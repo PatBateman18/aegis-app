@@ -1,0 +1,57 @@
+{
+  "expo": {
+    "name": "AEGIS",
+    "slug": "aegis-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#070707"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.yourname.aegis",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Pour choisir ton image de profil AEGIS",
+        "NSCameraUsageDescription": "Pour prendre une photo de profil AEGIS"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#070707"
+      },
+      "package": "com.yourname.aegis",
+      "permissions": [
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#C9A84C"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Accès à ta galerie pour choisir une image AEGIS"
+        }
+      ],
+      "expo-audio"
+    ],
+    "scheme": "aegis",
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
