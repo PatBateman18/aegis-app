@@ -52,6 +52,9 @@
     "scheme": "aegis",
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "elevenLabsKey": "2be7f7a9880551c55c93138370116810ca6256ecb44a01fe4a7968347cf96424"
     }
   }
 }

@@ -1,15 +1,18 @@
 // components/RanksScreen.tsx
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, Image, TouchableOpacity,
   StyleSheet, Dimensions, Animated, Easing,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useFocusEffect } from '@react-navigation/native';
 import { C } from '@/constants/colors';
 import { getRank, RANKS, calcTotalXP } from '@/constants/rpg';
 import { useAuth } from '@/hooks/useAuth';
 import { useDay } from '@/hooks/useDay';
+import { supabase } from '@/lib/supabase';
+import { useGender } from '@/hooks/useGender';
 
 const { width, height } = Dimensions.get('window');
 const GOLD       = '#C9A84C';
@@ -45,6 +48,31 @@ const IMGS: Record<string, any> = {
   'AEGIS':      require('@/assets/ranks/rank_aegis.png'),
 };
 
+const IMGS_FEMALE: Record<string, any> = {
+  'NOVICE':     require('@/assets/ranks/rank_novice_femme.png'),
+  'INITIÉ':     require('@/assets/ranks/rank_initie_femme.png'),
+  'DISCIPLE':   require('@/assets/ranks/rank_disciple_femme.png'),
+  'GUERRIER':   require('@/assets/ranks/rank_guerrier_femme.png'),
+  'STRATÈGE':   require('@/assets/ranks/rank_stratege_femme.png'),
+  'CONQUÉRANT': require('@/assets/ranks/rank_conquerant_femme.png'),
+  'CHAMPION':   require('@/assets/ranks/rank_champion_femme.png'),
+  'MAÎTRE':     require('@/assets/ranks/rank_maitre_femme.png'),
+  'ÉLITE':      require('@/assets/ranks/rank_elite_femme.png'),
+  'AEGIS':      require('@/assets/ranks/rank_aegis_femme.png'),
+};
+
+const FEMALE_RANK_NAMES: Record<string, string> = {
+  'INITIÉ':     'INITIÉE',
+  'GUERRIER':   'GUERRIÈRE',
+  'CONQUÉRANT': 'CONQUÉRANTE',
+  'CHAMPION':   'CHAMPIONNE',
+  'MAÎTRE':     'MAÎTRESSE',
+};
+
+function rankDisplayName(name: string, gender: string): string {
+  return gender === 'female' ? (FEMALE_RANK_NAMES[name] ?? name) : name;
+}
+
 const PHRASES: Record<string, string> = {
   'NOVICE': 'Tout commence ici.',
   'INITIÉ': 'Le voyage commence.',
@@ -56,6 +84,19 @@ const PHRASES: Record<string, string> = {
   'MAÎTRE': 'La maîtrise est ton standard.',
   'ÉLITE': 'Tu appartiens au sommet.',
   'AEGIS': 'Tu es devenu la légende.',
+};
+
+const PHRASES_FEMALE: Record<string, string> = {
+  'NOVICE': 'Tout commence ici.',
+  'INITIÉ': 'Le voyage commence.',
+  'DISCIPLE': 'La discipline forge le caractère.',
+  'GUERRIER': "Le corps et l'esprit s'alignent.",
+  'STRATÈGE': 'Chaque plan, exécuté.',
+  'CONQUÉRANT': 'Rien ne te résiste.',
+  'CHAMPION': 'Tu inspires sans le savoir.',
+  'MAÎTRE': 'La maîtrise est ton standard.',
+  'ÉLITE': 'Tu appartiens au sommet.',
+  'AEGIS': 'Tu es devenue la légende.',
 };
 
 const QUOTES: Record<string, string> = {
@@ -71,13 +112,47 @@ const QUOTES: Record<string, string> = {
   'AEGIS': 'La légende ne se raconte pas. Elle se vit.',
 };
 
+const QUOTES_FEMALE: Record<string, string> = {
+  'NOVICE': 'Chaque légende a commencé par un seul pas.',
+  'INITIÉ': "Ce n'est pas ton potentiel qui compte, c'est ta régularité.",
+  'DISCIPLE': "La discipline n'est pas une contrainte. C'est une liberté.",
+  'GUERRIER': "La bataille se gagne avant d'être livrée.",
+  'STRATÈGE': "Celle qui pense gagne avant d'agir.",
+  'CONQUÉRANT': "Elle n'attend pas. Elle avance.",
+  'CHAMPION': 'La championne est faite de défaites surmontées.',
+  'MAÎTRE': "La perfection n'est pas un but. C'est une habitude.",
+  'ÉLITE': 'Peu arrivent ici. Tu y es.',
+  'AEGIS': 'La légende ne se raconte pas. Elle se vit.',
+};
+
+
+
+// ─── RankImage — placeholder + fondu ────────────────────────────────────────
+function RankImage({ source }: { source: any }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+  function onLoad() {
+    Animated.timing(opacity, { toValue: 1, duration: 400, useNativeDriver: true }).start();
+  }
+  return (
+    <View style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}>
+      <View style={{ ...StyleSheet.absoluteFillObject, backgroundColor: '#06040A' }} />
+      <Animated.Image
+        source={source}
+        style={{ width: '100%', height: '100%', opacity }}
+        resizeMode="cover"
+        onLoad={onLoad}
+      />
+    </View>
+  );
+}
 
 // ─── Carte ────────────────────────────────────────────────────────────────────
-function RankCard({ rank, isCurrent, isUnlocked, cardH, wasJustUnlocked }: {
+function RankCard({ rank, isCurrent, isUnlocked, cardH, wasJustUnlocked, gender = 'male' }: {
   rank: typeof RANKS[0]; isCurrent: boolean; isUnlocked: boolean;
-  cardH: number; wasJustUnlocked?: boolean;
+  cardH: number; wasJustUnlocked?: boolean; gender?: string;
 }) {
   const borderCol = RANK_BORDER[rank.name] ?? GOLD;
+  const imgs = gender === 'female' ? IMGS_FEMALE : IMGS;
 
   // Glow bordure pulsant sur la carte active — JS driver
   const glowAnim = useRef(new Animated.Value(0)).current;
@@ -143,11 +218,7 @@ function RankCard({ rank, isCurrent, isUnlocked, cardH, wasJustUnlocked }: {
       <View style={{ flex: 1, borderRadius: 14, overflow: 'hidden', backgroundColor: '#06040A' }}>
 
         {/* Image */}
-        <Image
-          source={IMGS[rank.name]}
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
-          resizeMode="cover"
-        />
+        <RankImage source={imgs[rank.name]} />
 
         {/* Overlay noir et blanc si verrouillé — s'efface à l'unlock */}
         {!isUnlocked || wasJustUnlocked ? (
@@ -164,7 +235,7 @@ function RankCard({ rank, isCurrent, isUnlocked, cardH, wasJustUnlocked }: {
         {!isUnlocked && !wasJustUnlocked && (
           <>
             <Image
-              source={IMGS[rank.name]}
+              source={imgs[rank.name]}
               style={[StyleSheet.absoluteFillObject, { tintColor: '#888', opacity: 0.6 }]}
               resizeMode="cover"
             />
@@ -197,11 +268,11 @@ function RankCard({ rank, isCurrent, isUnlocked, cardH, wasJustUnlocked }: {
             fontFamily: 'Cinzel', fontSize: 18, letterSpacing: 3, textAlign: 'center', marginBottom: 6,
             color: isUnlocked ? (isCurrent ? borderCol : '#EAE0CC') : '#3a3530',
           }}>
-            {rank.name}
+            {rankDisplayName(rank.name, gender)}
           </Text>
           <Text style={{ fontSize: 12, textAlign: 'center', lineHeight: 17, paddingHorizontal: 20,
             color: isUnlocked ? '#8a8070' : '#2a2520' }}>
-            {isUnlocked ? PHRASES[rank.name] : `${rank.minXP} XP requis`}
+            {isUnlocked ? (gender === 'female' ? PHRASES_FEMALE[rank.name] : PHRASES[rank.name]) : `${rank.minXP} XP requis`}
           </Text>
         </View>
 
@@ -210,15 +281,25 @@ function RankCard({ rank, isCurrent, isUnlocked, cardH, wasJustUnlocked }: {
   );
 }
 
+// ─── Déduplique RANKS → une entrée par nom de rang ──────────────────────────
+const UNIQUE_RANKS = RANKS.filter((r, i, arr) =>
+  i === arr.findIndex(x => x.name === r.name)
+);
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
-export default function RanksScreen({ onClose }: { onClose?: () => void }) {
+export default function RanksScreen({ onClose, isInDanger = false, initialRankLevel }: { 
+  onClose?: () => void; 
+  isInDanger?: boolean;
+  initialRankLevel?: number;
+}) {
   const insets   = useSafeAreaInsets();
   const { user } = useAuth();
   const { day, history } = useDay(user?.id);
   const allDays  = [...history.filter(h => h.date !== day.date), day];
   const totalXP  = calcTotalXP(allDays);
   const rank     = getRank(totalXP);
-  const nextRank = RANKS.find(r => r.level === rank.level + 1);
+  const gender   = useGender(user?.id);
+  const nextRank = UNIQUE_RANKS.find(r => r.minXP > rank.minXP);
   const xpToNext = nextRank ? nextRank.minXP - totalXP : 0;
   const progress = nextRank ? Math.min((totalXP - rank.minXP) / (nextRank.minXP - rank.minXP), 1) : 1;
   const scrollRef = useRef<ScrollView>(null);
@@ -229,10 +310,25 @@ export default function RanksScreen({ onClose }: { onClose?: () => void }) {
   const quoteH  = 54;
   const cardH   = height - headerH - subH - footerH - quoteH - 18;
 
+  const hasScrolled = useRef(false);
+
+  function scrollToCurrentRank() {
+    if (hasScrolled.current) return;
+    const idx = UNIQUE_RANKS.findIndex(r => r.name === rank.name);
+    if (idx > 0 && scrollRef.current) {
+      scrollRef.current.scrollTo({ x: idx * CARD_W, animated: false });
+      hasScrolled.current = true;
+    }
+  }
+
   useEffect(() => {
-    const idx = RANKS.findIndex(r => r.level === rank.level);
-    if (idx > 0) setTimeout(() =>
-      scrollRef.current?.scrollTo({ x: idx * CARD_W, animated: true }), 400);
+    const idx = UNIQUE_RANKS.findIndex(r => r.name === rank.name);
+    if (idx > 0) {
+      setTimeout(() => {
+        scrollRef.current?.scrollTo({ x: idx * CARD_W, animated: false });
+        hasScrolled.current = true;
+      }, 300);
+    }
   }, []);
 
   return (
@@ -246,11 +342,11 @@ export default function RanksScreen({ onClose }: { onClose?: () => void }) {
             backgroundColor: GOLD + '18', borderWidth: 1, borderColor: GOLD + '44',
             alignItems: 'center', justifyContent: 'center',
           }}>
-            <Text style={{ color: GOLDB, fontSize: 26, lineHeight: 30 }}>‹</Text>
+            <Text style={{ color: GOLDB, fontSize: 22, lineHeight: 22, marginTop: 1 }}>‹</Text>
           </TouchableOpacity>
-          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
             <Text style={{ color: GOLD, fontSize: 9 }}>✦</Text>
-            <Text style={{ fontFamily: 'Cinzel', fontSize: 18, color: GOLDB, letterSpacing: 6 }}>RANG</Text>
+            <Text style={{ fontFamily: 'Cinzel', fontSize: 18, color: GOLDB, letterSpacing: 6, marginRight: -6 }}>RANG</Text>
             <Text style={{ color: GOLD, fontSize: 9 }}>✦</Text>
           </View>
           <View style={{ width: 44 }} />
@@ -272,14 +368,17 @@ export default function RanksScreen({ onClose }: { onClose?: () => void }) {
         snapToAlignment="start"
         decelerationRate="fast"
         style={{ flexGrow: 0 }}
+        onLayout={scrollToCurrentRank}
+        contentOffset={{ x: UNIQUE_RANKS.findIndex(r => r.name === rank.name) * CARD_W, y: 0 }}
       >
-        {RANKS.map((r, i) => (
+        {UNIQUE_RANKS.map((r) => (
           <RankCard
-            key={r.level}
+            key={r.name}
             rank={r}
-            isCurrent={r.level === rank.level}
+            isCurrent={r.name === rank.name}
             isUnlocked={totalXP >= r.minXP}
             cardH={cardH}
+            gender={gender}
           />
         ))}
       </ScrollView>
@@ -308,16 +407,16 @@ export default function RanksScreen({ onClose }: { onClose?: () => void }) {
         {nextRank && (
           <View style={{ alignItems: 'flex-end', minWidth: 100 }}>
             <Text style={{ fontSize: 8, color: '#555', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 4 }}>PROCHAIN RANG</Text>
-            <Text style={{ fontFamily: 'Cinzel', fontSize: 11, color: C.dim, letterSpacing: 1, marginBottom: 2 }}>{nextRank.name} 🔒</Text>
+            <Text style={{ fontFamily: 'Cinzel', fontSize: 11, color: C.dim, letterSpacing: 1, marginBottom: 2 }}>{rankDisplayName(nextRank.name, gender)} ◈</Text>
             <Text style={{ fontSize: 9, color: '#444' }}>{xpToNext} XP restants</Text>
           </View>
         )}
       </View>
 
       {/* Citation */}
-      <View style={{ alignItems: 'center', paddingHorizontal: 28, height: quoteH, justifyContent: 'center' }}>
+      <View style={{ alignItems: 'center', paddingHorizontal: 24, height: quoteH, justifyContent: 'center' }}>
         <Text style={{ fontSize: 11, color: '#555', fontStyle: 'italic', textAlign: 'center', lineHeight: 16 }}>
-          "{QUOTES[rank.name]}"
+          "{(gender === 'female' ? QUOTES_FEMALE : QUOTES)[rank.name]}"
         </Text>
         <Text style={{ fontFamily: 'Cinzel', fontSize: 9, color: GOLD + '88', letterSpacing: 3, marginTop: 4 }}>— KRIOS</Text>
       </View>

@@ -1,97 +1,134 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
+import { useRouter } from 'expo-router';
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, Dimensions, Modal, TextInput, Animated,
-  KeyboardAvoidingView, Platform, Alert,
+  Dimensions, Modal, TextInput, Animated, Easing,
+  KeyboardAvoidingView, Platform, Alert, Image, StyleSheet, Switch,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/hooks/useAuth';
 import { useDay } from '@/hooks/useDay';
+import { useStreakShields } from '@/hooks/useStreakShields';
+import { usePause } from '@/hooks/usePause';
+import { useMentor } from '@/hooks/useMentor';
+import { getMentor } from '@/constants/mentors';
+import MentorScreen from '@/components/MentorScreen';
+import { useAmbientSound } from '@/hooks/useAmbientSound';
+import { supabase } from '@/lib/supabase';
+import { useGender } from '@/hooks/useGender';
 import { C } from '@/constants/colors';
-import { XPBar, RankBadge } from '@/components/XPBar';
-import { AvatarDisplay, AvatarHero } from '@/components/AvatarCreator';
-import AvatarCreator, { type AvatarConfig } from '@/components/AvatarCreator';
+import { calcTotalXP, getRank, RANKS, STREAK_MILESTONES, getXPProgress, getXPNeeded } from '@/constants/rpg';
 import MedalBadge from '@/components/MedalBadge';
 import VoyageModal from '@/components/VoyageModal';
+import AchievementsScreen from '@/components/AchievementsScreen';
+import SoundSettingsScreen from '@/components/SoundSettingsScreen';
 import RanksScreen from '@/components/RanksScreen';
+import { useInactivity } from '@/hooks/useInactivity';
 import NotificationSettings from '@/components/NotifSettings';
-import { calcTotalXP, getRank, RANKS, STREAK_MILESTONES } from '@/constants/rpg';
 import { calcScore, HABIT_KEYS, HABIT_LABELS } from '@/constants/types';
+import { XPFillBar } from '@/components/XPFillBar';
 
-const { width } = Dimensions.get('window');
+// ─── Médailles de rang (niveau 1 à 10) ─────────────────────────────────────
+const RANK_MEDALS: Record<number, any> = {
+  1:  require('@/assets/medals/medaille_rang_01_novice.png'),
+  2:  require('@/assets/medals/medaille_rang_02_initie.png'),
+  3:  require('@/assets/medals/medaille_rang_03_disciple.png'),
+  4:  require('@/assets/medals/medaille_rang_04_guerrier.png'),
+  5:  require('@/assets/medals/medaille_rang_05_strategie.png'),
+  6:  require('@/assets/medals/medaille_rang_06_conquerant.png'),
+  7:  require('@/assets/medals/medaille_rang_07_champion.png'),
+  8:  require('@/assets/medals/medaille_rang_08_maitre.png'),
+  9:  require('@/assets/medals/medaille_rang_09_elite.png'),
+  10: require('@/assets/medals/medaille_rang_10_aegis.png'),
+};
+import { StreakFlame } from '@/components/StreakFlame';
 
-// ─── Palette or AEGIS ────────────────────────────────────────────────────────
+const { width, height } = Dimensions.get('window');
 const GOLD  = '#C9A84C';
 const GOLDB = '#E8C46A';
-const GOLDD = '#C9A84C33';
-// ─────────────────────────────────────────────────────────────────────────────
+const GOLDD = '#C9A84C22';
 
-const RANK_PHRASES: Record<string, string> = {
-  'INITIÉ':     'Les fondations sont posées.',
-  'DISCIPLE':   'La discipline prend racine.',
-  'GUERRIER':   'Le corps et l\'esprit s\'alignent.',
-  'STRATÈGE':   'Chaque jour, un plan. Chaque plan, exécuté.',
-  'CONQUÉRANT': 'Rien ne résiste à ta constance.',
-  'CHAMPION':   'Tu inspires sans le savoir.',
-  'MAÎTRE':     'La maîtrise est ton standard.',
-  'ÉLITE':      'Tu appartiens au sommet.',
-  'AEGIS':      'Tu es devenu la légende.',
+const HERO_IMG = require('@/assets/hero/hero_profil.png');
+
+const RANK_IMGS: Record<string, any> = {
+  'NOVICE':     require('@/assets/ranks/rank_novice.png'),
+  'INITIÉ':     require('@/assets/ranks/rank_initie.png'),
+  'DISCIPLE':   require('@/assets/ranks/rank_disciple.png'),
+  'GUERRIER':   require('@/assets/ranks/rank_guerrier.png'),
+  'STRATÈGE':   require('@/assets/ranks/rank_stratege.png'),
+  'CONQUÉRANT': require('@/assets/ranks/rank_conquerant.png'),
+  'CHAMPION':   require('@/assets/ranks/rank_champion.png'),
+  'MAÎTRE':     require('@/assets/ranks/rank_maitre.png'),
+  'ÉLITE':      require('@/assets/ranks/rank_elite.png'),
+  'AEGIS':      require('@/assets/ranks/rank_aegis.png'),
 };
 
+const RANK_IMGS_FEMALE: Record<string, any> = {
+  'NOVICE':     require('@/assets/ranks/rank_novice_femme.png'),
+  'INITIÉ':     require('@/assets/ranks/rank_initie_femme.png'),
+  'DISCIPLE':   require('@/assets/ranks/rank_disciple_femme.png'),
+  'GUERRIER':   require('@/assets/ranks/rank_guerrier_femme.png'),
+  'STRATÈGE':   require('@/assets/ranks/rank_stratege_femme.png'),
+  'CONQUÉRANT': require('@/assets/ranks/rank_conquerant_femme.png'),
+  'CHAMPION':   require('@/assets/ranks/rank_champion_femme.png'),
+  'MAÎTRE':     require('@/assets/ranks/rank_maitre_femme.png'),
+  'ÉLITE':      require('@/assets/ranks/rank_elite_femme.png'),
+  'AEGIS':      require('@/assets/ranks/rank_aegis_femme.png'),
+};
+
+const FEMALE_RANK_NAMES: Record<string, string> = {
+  'INITIÉ': 'INITIÉE', 'GUERRIER': 'GUERRIÈRE',
+  'CONQUÉRANT': 'CONQUÉRANTE', 'CHAMPION': 'CHAMPIONNE', 'MAÎTRE': 'MAÎTRESSE',
+};
+function rankDisplayName(name: string, gender: string): string {
+  return gender === 'female' ? (FEMALE_RANK_NAMES[name] ?? name) : name;
+}
+
 const HABIT_ICONS: Record<string, string> = {
-  workout_done:  '⚔️',
-  calories_ok:   '🍎',
-  learning_done: '📚',
-  m_face:        '✨',
-  outfit_ok:     '👔',
-  morning_water: '💧',
+  workout_done: '⚡', calories_ok: '🔥', learning_done: '📚',
+  m_face: '✨', outfit_ok: '👔', morning_water: '💧',
 };
 
 // ─── EditProfileModal ─────────────────────────────────────────────────────────
 function EditProfileModal({ profile, onClose, onSave }: { profile: any; onClose: () => void; onSave: (d: any) => void }) {
   const [name, setName] = useState(profile?.name ?? '');
-  const [cal, setCal]   = useState(String(profile?.cal_target ?? 2300));
+  const [cal,  setCal]  = useState(String(profile?.cal_target ?? 2300));
   const [prot, setProt] = useState(String(profile?.prot_target ?? 180));
-
   function handleSave() {
     if (!name.trim()) return Alert.alert('Entre ton prénom');
-    const calNum = parseInt(cal), protNum = parseInt(prot);
-    if (isNaN(calNum) || calNum < 1000 || calNum > 5000) return Alert.alert('Calories invalides');
-    if (isNaN(protNum) || protNum < 50  || protNum > 400) return Alert.alert('Protéines invalides');
-    onSave({ name: name.trim(), cal_target: calNum, prot_target: protNum });
+    const cn = parseInt(cal), pn = parseInt(prot);
+    if (isNaN(cn) || cn < 1000 || cn > 5000) return Alert.alert('Calories invalides');
+    if (isNaN(pn) || pn < 50  || pn > 400)  return Alert.alert('Protéines invalides');
+    onSave({ name: name.trim(), cal_target: cn, prot_target: pn });
     onClose();
   }
-
   return (
     <Modal visible animationType="slide" presentationStyle="pageSheet">
       <View style={{ flex: 1, backgroundColor: C.bg }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderBottomWidth: 1, borderBottomColor: C.s3 }}>
           <TouchableOpacity onPress={onClose}><Text style={{ color: C.dim, fontSize: 14 }}>Annuler</Text></TouchableOpacity>
           <Text style={{ fontFamily: 'Cinzel', fontSize: 16, color: GOLDB, letterSpacing: 2 }}>MON COMPTE</Text>
-          <TouchableOpacity onPress={handleSave}><Text style={{ color: GOLD, fontSize: 14, fontWeight: '700' }}>Sauvegarder</Text></TouchableOpacity>
+          <TouchableOpacity onPress={handleSave}><Text style={{ color: GOLD, fontSize: 14, fontWeight: '700' }}>Sauver</Text></TouchableOpacity>
         </View>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <ScrollView contentContainerStyle={{ padding: 24 }}>
-
-            {/* Avatar dans les paramètres */}
-            <Text style={edit.sectionTitle}>Identité</Text>
-            <Text style={edit.label}>Prénom</Text>
-            <TextInput style={edit.input} value={name} onChangeText={setName} placeholder="Ton prénom" placeholderTextColor={C.dim} autoCorrect={false} />
-
-            <Text style={edit.sectionTitle}>Objectifs nutritionnels</Text>
-            <Text style={edit.label}>Calories par jour</Text>
-            <View style={edit.inputRow}>
-              <TextInput style={[edit.input, { flex: 1, marginBottom: 0 }]} value={cal} onChangeText={setCal} keyboardType="numeric" placeholder="2300" placeholderTextColor={C.dim} />
-              <Text style={edit.unit}>kcal</Text>
+            <Text style={{ fontFamily: 'Cinzel', fontSize: 14, color: GOLD, letterSpacing: 2, marginBottom: 16 }}>Identité</Text>
+            <Text style={{ fontSize: 10, color: C.dim, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 8 }}>Prénom</Text>
+            <TextInput style={{ backgroundColor: C.s2, borderWidth: 1, borderColor: C.s3, borderRadius: 10, padding: 14, color: C.text, fontSize: 15, marginBottom: 16 }} value={name} onChangeText={setName} placeholder="Ton prénom" placeholderTextColor={C.dim} autoCorrect={false} />
+            <Text style={{ fontFamily: 'Cinzel', fontSize: 14, color: GOLD, letterSpacing: 2, marginTop: 8, marginBottom: 16 }}>Objectifs nutritionnels</Text>
+            <Text style={{ fontSize: 10, color: C.dim, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 8 }}>Calories / jour</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+              <TextInput style={{ flex: 1, backgroundColor: C.s2, borderWidth: 1, borderColor: C.s3, borderRadius: 10, padding: 14, color: C.text, fontSize: 15 }} value={cal} onChangeText={setCal} keyboardType="numeric" placeholder="2300" placeholderTextColor={C.dim} />
+              <Text style={{ color: C.dim, fontSize: 13, width: 36 }}>kcal</Text>
             </View>
-            <Text style={[edit.label, { marginTop: 14 }]}>Protéines par jour</Text>
-            <View style={edit.inputRow}>
-              <TextInput style={[edit.input, { flex: 1, marginBottom: 0 }]} value={prot} onChangeText={setProt} keyboardType="numeric" placeholder="180" placeholderTextColor={C.dim} />
-              <Text style={edit.unit}>g</Text>
+            <Text style={{ fontSize: 10, color: C.dim, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 8 }}>Protéines / jour</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <TextInput style={{ flex: 1, backgroundColor: C.s2, borderWidth: 1, borderColor: C.s3, borderRadius: 10, padding: 14, color: C.text, fontSize: 15 }} value={prot} onChangeText={setProt} keyboardType="numeric" placeholder="180" placeholderTextColor={C.dim} />
+              <Text style={{ color: C.dim, fontSize: 13, width: 36 }}>g</Text>
             </View>
-
           </ScrollView>
         </KeyboardAvoidingView>
       </View>
@@ -100,19 +137,19 @@ function EditProfileModal({ profile, onClose, onSave }: { profile: any; onClose:
 }
 
 // ─── MonthPickerModal ─────────────────────────────────────────────────────────
-function MonthPickerModal({ current, history, onSelect, onClose }: { current: { month: number; year: number }; history: any[]; onSelect: (m: number, y: number) => void; onClose: () => void }) {
-  const oldestDate = history.length > 0
-    ? new Date(Math.min(...history.map(d => new Date(d.date).getTime())))
-    : new Date();
+function MonthPickerModal({ current, history, createdAt, onSelect, onClose }: any) {
   const months: { month: number; year: number }[] = [];
-  const cursor = new Date(oldestDate.getFullYear(), oldestDate.getMonth(), 1);
-  const now = new Date();
-  while (cursor <= now) {
-    months.push({ month: cursor.getMonth(), year: cursor.getFullYear() });
-    cursor.setMonth(cursor.getMonth() + 1);
-  }
-  months.reverse();
+  const cursor = new Date(); cursor.setDate(1);
+  // Date de début = premier historique ou création du compte
+  const earliest = createdAt ? new Date(createdAt) : history?.length > 0
+    ? new Date([...history].sort((a: any, b: any) => a.date.localeCompare(b.date))[0].date)
+    : new Date(cursor.getFullYear(), cursor.getMonth() - 11, 1);
+  earliest.setDate(1);
 
+  while (cursor >= earliest) {
+    months.push({ month: cursor.getMonth(), year: cursor.getFullYear() });
+    cursor.setMonth(cursor.getMonth() - 1);
+  }
   return (
     <Modal visible animationType="slide" presentationStyle="pageSheet">
       <View style={{ flex: 1, backgroundColor: C.bg }}>
@@ -125,21 +162,11 @@ function MonthPickerModal({ current, history, onSelect, onClose }: { current: { 
           {months.map(({ month, year }) => {
             const isSelected = month === current.month && year === current.year;
             const label = new Date(year, month, 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
-            const days  = history.filter(d => { const dt = new Date(d.date); return dt.getMonth() === month && dt.getFullYear() === year; });
-            const avg   = days.length > 0 ? Math.round(days.reduce((a, d) => a + calcScore(d), 0) / days.length) : 0;
             return (
-              <TouchableOpacity
-                key={`${year}-${month}`}
-                style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: isSelected ? GOLDD : C.s1, borderWidth: 1, borderColor: isSelected ? GOLD : C.s3, borderRadius: 12, padding: 16, marginBottom: 10 }}
-                onPress={() => { onSelect(month, year); onClose(); }}
-              >
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontFamily: 'Cinzel', fontSize: 14, color: isSelected ? GOLDB : C.text, textTransform: 'capitalize' }}>{label}</Text>
-                  <Text style={{ fontSize: 11, color: C.dim, marginTop: 3 }}>{days.length} jours enregistrés</Text>
-                </View>
-                <Text style={{ fontFamily: 'SpaceMono', fontSize: 16, color: avg >= 70 ? C.green : avg >= 40 ? GOLD : C.dim }}>
-                  {days.length > 0 ? `${avg}%` : '—'}
-                </Text>
+              <TouchableOpacity key={`${year}-${month}`}
+                style={{ backgroundColor: isSelected ? GOLDD : C.s1, borderWidth: 1, borderColor: isSelected ? GOLD : C.s3, borderRadius: 12, padding: 16, marginBottom: 10 }}
+                onPress={() => { onSelect(month, year); onClose(); }}>
+                <Text style={{ fontFamily: 'Cinzel', fontSize: 14, color: isSelected ? GOLDB : C.text, textTransform: 'capitalize' }}>{label}</Text>
               </TouchableOpacity>
             );
           })}
@@ -149,133 +176,180 @@ function MonthPickerModal({ current, history, onSelect, onClose }: { current: { 
   );
 }
 
-// ─── ProfileScreen ────────────────────────────────────────────────────────────
-
-// ─── RanksAccordion — tap pour voir tous les rangs ────────────────────────────
-function RanksAccordion({ rank, totalXP }: { rank: any; totalXP: number }) {
-  const [open, setOpen] = useState(false);
-  const anim = useRef(new Animated.Value(0)).current;
-
-  function toggle() {
-    setOpen(o => !o);
-    Animated.spring(anim, { toValue: open ? 0 : 1, tension: 80, friction: 12, useNativeDriver: false }).start();
-  }
-
-  const maxH = anim.interpolate({ inputRange: [0, 1], outputRange: [0, RANKS.length * 64] });
-
-  return (
-    <View style={{ backgroundColor: C.s1, borderWidth: 1, borderColor: C.s3, borderRadius: 16, overflow: 'hidden', marginBottom: 14 }}>
-      <TouchableOpacity onPress={toggle} style={{ flexDirection: 'row', alignItems: 'center', padding: 18, gap: 14 }}>
-        <View style={{
-          width: 44, height: 44, borderRadius: 22,
-          backgroundColor: rank.color + '22', borderWidth: 2, borderColor: rank.color,
-          alignItems: 'center', justifyContent: 'center',
-          shadowColor: rank.color, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.4, shadowRadius: 8,
-        }}>
-          <Text style={{ fontFamily: 'Cinzel', fontSize: 9, color: rank.color, fontWeight: '700', textAlign: 'center' }}>{rank.name}</Text>
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={{ fontFamily: 'Cinzel', fontSize: 15, color: rank.color, letterSpacing: 1 }}>{rank.name}</Text>
-          <Text style={{ fontSize: 11, color: C.dim, marginTop: 2, fontStyle: 'italic' }}>
-            {RANK_PHRASES[rank.name] ?? 'Continue.'}
-          </Text>
-        </View>
-        <Animated.Text style={{
-          color: GOLD, fontSize: 16,
-          transform: [{ rotate: anim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '180deg'] }) }],
-        }}>
-          {'>'}
-        </Animated.Text>
-      </TouchableOpacity>
-
-      <Animated.View style={{ maxHeight: maxH, overflow: 'hidden' }}>
-        <View style={{ borderTopWidth: 1, borderTopColor: C.s3 }}>
-          {RANKS.map((r, i) => {
-            const achieved  = totalXP >= r.minXP;
-            const isCurrent = rank.level === r.level;
-            return (
-              <View key={r.level} style={{
-                flexDirection: 'row', alignItems: 'center', gap: 14,
-                paddingHorizontal: 18, paddingVertical: 12,
-                backgroundColor: isCurrent ? r.color + '0C' : 'transparent',
-                borderBottomWidth: i < RANKS.length - 1 ? 1 : 0, borderBottomColor: C.s3,
-              }}>
-                <View style={{
-                  width: 28, height: 28, borderRadius: 14,
-                  backgroundColor: achieved ? r.color + '22' : C.s2,
-                  borderWidth: 1.5, borderColor: achieved ? r.color : C.s3,
-                  alignItems: 'center', justifyContent: 'center',
-                }}>
-                  {achieved
-                    ? <Text style={{ color: r.color, fontSize: 12, fontWeight: '800' }}>{'v'}</Text>
-                    : <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: C.s3 }} />
-                  }
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontFamily: 'Cinzel', fontSize: 12, letterSpacing: 1, color: achieved ? r.color : C.dim }}>
-                    {r.name}{isCurrent ? '  <' : ''}
-                  </Text>
-                  <Text style={{ fontSize: 10, color: C.dim, marginTop: 1 }}>{r.minXP} XP</Text>
-                </View>
-                {isCurrent && (
-                  <View style={{ backgroundColor: r.color + '22', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3, borderWidth: 1, borderColor: r.color + '55' }}>
-                    <Text style={{ fontSize: 8, color: r.color, fontWeight: '700', letterSpacing: 1 }}>ACTUEL</Text>
-                  </View>
-                )}
-              </View>
-            );
-          })}
-        </View>
-      </Animated.View>
-    </View>
-  );
-}
-
+// ─── ProfileScreen ─────────────────────────────────────────────────────────────
 export default function ProfileScreen() {
+  const router = useRouter();
   const { user, profile, updateProfile, signOut } = useAuth();
-  const { day, history, streak, loadHistory, loadToday } = useDay(user?.id);
+  const { shields, shieldDates, syncShields } = useStreakShields(user?.id);
+  const { pausedDates, pauseUntil, isPauseActive, startPause, cancelPause } = usePause(user?.id);
+  const { playAmbient, enabled: ambientEnabled, setEnabled: setAmbientEnabled } = useAmbientSound();
 
-  const scrollRef  = useRef<any>(null);
-  const ranksRef   = useRef<any>(null);
-  const medalsRef  = useRef<any>(null);
-  const heatmapRef = useRef<any>(null);
-  const regulRef   = useRef<any>(null);
+  useFocusEffect(useCallback(() => {
+    playAmbient('profil');
+  }, []));
+  const { day, history, streak, loadHistory, loadToday, updateDay } = useDay(user?.id, [...shieldDates, ...pausedDates]);
+
+  useEffect(() => {
+    if (day && history) syncShields(day, history);
+  }, [day?.date, history.length]);
+  const gender   = useGender(user?.id);
+  const { mentorId, setMentorId } = useMentor(user?.id, gender);
+  const currentMentor = getMentor(mentorId);
+  const [showMentor, setShowMentor] = useState(false);
+  const isFemale = gender === 'female';
+  const rankImgs = isFemale ? RANK_IMGS_FEMALE : RANK_IMGS;
 
   const [showEdit,          setShowEdit]          = useState(false);
   const [showMonthPicker,   setShowMonthPicker]   = useState(false);
-  const [showAvatarCreator, setShowAvatarCreator] = useState(false);
   const [showSettings,      setShowSettings]      = useState(false);
+
+  async function confirmDeleteAccount() {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      if (!token) {
+        Alert.alert('Erreur', 'Session introuvable — reconnecte-toi et réessaie.');
+        return;
+      }
+
+      const { error } = await supabase.functions.invoke('delete-account', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (error) {
+        console.error('[delete-account] failed:', error);
+        Alert.alert('Erreur', "La suppression a échoué. Réessaie, ou contacte le support si ça persiste.");
+        return;
+      }
+
+      await signOut();
+    } catch (e) {
+      console.error('[delete-account] exception:', e);
+      Alert.alert('Erreur', 'Une erreur est survenue. Réessaie plus tard.');
+    }
+  }
+
+  function handleDeleteAccount() {
+    Alert.alert(
+      'Supprimer ton compte ?',
+      'Toutes tes données seront définitivement effacées : habitudes, photos, objectifs, succès, statistiques. Cette action est irréversible.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Continuer',
+          style: 'destructive',
+          onPress: () => {
+            Alert.alert(
+              'Es-tu vraiment sûr ?',
+              'Dernière confirmation — cette suppression ne peut pas être annulée.',
+              [
+                { text: 'Annuler', style: 'cancel' },
+                { text: 'Supprimer définitivement', style: 'destructive', onPress: confirmDeleteAccount },
+              ]
+            );
+          },
+        },
+      ]
+    );
+  }
+  const [showPauseModal,    setShowPauseModal]    = useState(false);
   const [showVoyage,        setShowVoyage]        = useState(false);
+  const [showAchievements,  setShowAchievements]  = useState(false);
   const [showRanks,         setShowRanks]         = useState(false);
   const [showNotifSettings, setShowNotifSettings] = useState(false);
-  const [avatarConfig,      setAvatarConfig]      = useState<AvatarConfig>({ body: 'athletic', skin: 3 });
+  const [showSoundSettings, setShowSoundSettings] = useState(false);
   const [selectedMonth,     setSelectedMonth]     = useState(new Date().getMonth());
   const [selectedYear,      setSelectedYear]      = useState(new Date().getFullYear());
   const [unlockedMilestones,setUnlockedMilestones]= useState<Set<number>>(new Set());
+  const [xpPenalty, setXpPenalty] = useState(0);
+  const [extendedHistory, setExtendedHistory] = useState<any[]>([]);
+  const [statsRange, setStatsRange] = useState<'week' | 'month' | '6months' | 'year' | 'all'>('month');
+
+  useFocusEffect(useCallback(() => {
+    if (!user?.id) return;
+    supabase.from('daily_logs').select('*').eq('user_id', user.id).order('date', { ascending: false }).limit(400)
+      .then(({ data, error }) => {
+        if (error) console.error('[Profile] extendedHistory load failed:', error);
+        if (data) setExtendedHistory(data);
+      });
+  }, [user?.id]));
+  const [journalText, setJournalText] = useState(day.journal || '');
+  const journalTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Resynchronise le champ local si le journal change depuis ailleurs (changement de jour, reload...)
+  // mais jamais pendant que l'utilisateur est en train de taper.
+  useEffect(() => {
+    if (journalTimer.current == null) setJournalText(day.journal || '');
+  }, [day.journal]);
+
+  function onJournalChange(v: string) {
+    setJournalText(v); // instantané, aucun aller-retour réseau ici
+    if (journalTimer.current) clearTimeout(journalTimer.current);
+    journalTimer.current = setTimeout(() => {
+      updateDay({ journal: v });
+      journalTimer.current = null;
+    }, 600);
+  }
+  const { status: inactivity } = useInactivity(user?.id, profile?.name ?? '');
+  const heroScale = useRef(new Animated.Value(1)).current;
+  const insets = useSafeAreaInsets();
 
   useFocusEffect(useCallback(() => {
     if (user?.id) { loadHistory(); loadToday(); }
   }, [user?.id]));
 
+  useFocusEffect(useCallback(() => {
+    if (!user?.id) return;
+    supabase.from('profiles').select('xp_penalty').eq('id', user.id).single()
+      .then(({ data }) => { if (data) setXpPenalty((data as any).xp_penalty ?? 0); });
+  }, [user?.id]));
+
   useEffect(() => {
     async function load() {
-      const unlocked = new Set<number>();
+      const u = new Set<number>();
       for (const m of STREAK_MILESTONES) {
-        const shown = await AsyncStorage.getItem(`@aegis:milestone_shown_${m.days}`);
-        if (shown) unlocked.add(m.days);
+        if (await AsyncStorage.getItem(`@aegis:milestone_shown_${m.days}`)) u.add(m.days);
       }
-      setUnlockedMilestones(unlocked);
+      setUnlockedMilestones(u);
     }
     load();
   }, []);
 
+  useEffect(() => {
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(heroScale, { toValue: 1.03, duration: 4000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      Animated.timing(heroScale, { toValue: 1,    duration: 4000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, []);
+
+  // Stagger
+  const stagger = useRef([0,1,2,3,4,5,6].map(() => new Animated.Value(0))).current;
+  useEffect(() => {
+    setTimeout(() => {
+      Animated.stagger(80, stagger.map(a =>
+        Animated.spring(a, { toValue: 1, tension: 50, friction: 12, useNativeDriver: true })
+      )).start();
+    }, 200);
+  }, []);
+  const S = (i: number) => ({
+    opacity: stagger[i],
+    transform: [{ translateY: stagger[i].interpolate({ inputRange: [0,1], outputRange: [20, 0] }) }],
+  });
+
   if (!user) return null;
 
-  // ── Calculs ────────────────────────────────────────────────────────────────
-  const totalXP    = calcTotalXP([...history.filter(h => h.date !== day.date), day]);
-  const rank       = getRank(totalXP);
-  const totalDays  = history.length;
-  const perfectDays = [...history.filter(h => h.date !== day.date), day].filter(d => calcScore(d) === 100).length;
+  const allDays   = [...history.filter(h => h.date !== day.date), day];
+  const totalXP   = Math.max(0, calcTotalXP(allDays) - xpPenalty);
+  const rank      = getRank(totalXP);
+  const totalDays = history.length;
+  // Liste ordonnée des 10 paliers de rang (noms uniques, dans l'ordre d'apparition)
+  const RANK_TIERS = RANKS.filter((r, i) => i === 0 || r.name !== RANKS[i - 1].name);
+  const rankTierIndex = RANK_TIERS.findIndex(r => r.name === rank.name) + 1; // 1-10
+  const nextRank  = RANK_TIERS[rankTierIndex] ?? null; // le prochain palier de nom, ou null si AEGIS
+  const xpNeeded  = nextRank ? nextRank.minXP - totalXP : 0;
+
   const bestStreak = (() => {
     let best = 0, cur = 0;
     for (const d of [...history].sort((a, b) => a.date.localeCompare(b.date))) {
@@ -283,287 +357,371 @@ export default function ProfileScreen() {
     }
     return best;
   })();
+
+  const avgRegularity = totalDays > 0
+    ? Math.round(allDays.reduce((a, d) => a + calcScore(d), 0) / allDays.length)
+    : 0;
+
+  const RANGE_DAYS: Record<typeof statsRange, number | null> = {
+    week: 7, month: 30, '6months': 182, year: 365, all: null,
+  };
+  const rangeCutoff = (() => {
+    const days = RANGE_DAYS[statsRange];
+    if (days == null) return null;
+    const d = new Date();
+    d.setDate(d.getDate() - days);
+    return d.toISOString().split('T')[0];
+  })();
+  const rangedAllDays = [...extendedHistory.filter((h: any) => h.date !== day.date), day]
+    .filter((d: any) => !rangeCutoff || d.date >= rangeCutoff);
+  const rangedTotalDays = rangedAllDays.length;
+
   const habitStats = HABIT_KEYS.map(k => ({
     key: k as string,
     label: HABIT_LABELS[k as string],
-    icon: HABIT_ICONS[k as string] ?? '✦',
-    pct: totalDays > 0 ? Math.round((history.filter(d => !!(d as any)[k]).length / totalDays) * 100) : 0,
+    pct: rangedTotalDays > 0 ? Math.round((rangedAllDays.filter((d: any) => !!d[k]).length / rangedTotalDays) * 100) : 0,
   })).sort((a, b) => b.pct - a.pct);
 
-  const nextMilestone = STREAK_MILESTONES.find(m => streak < m.days);
+  // Heatmap
+  const today        = new Date().toISOString().split('T')[0];
+  const heatmapW  = Math.floor((width - 32 - 10) / 2) - 28; // moitié écran moins padding carte
+  const cellSize  = Math.floor((heatmapW - 6 * 3) / 7);
+  const monthDays    = (() => {
+    const isCurrentMonth = selectedMonth === new Date().getMonth() && selectedYear === new Date().getFullYear();
+    const lastDay = isCurrentMonth ? new Date().getDate() : new Date(selectedYear, selectedMonth + 1, 0).getDate();
+    // Offset : quel jour de semaine est le 1er du mois (0=Lun, 6=Dim)
+    const firstDow = (new Date(selectedYear, selectedMonth, 1).getDay() + 6) % 7;
+    const cells: any[] = [];
+    // Cases vides pour aligner
+    for (let i = 0; i < firstDow; i++) cells.push({ empty: true, day: -i });
+    // Cases réelles
+    for (let i = 1; i <= lastDay; i++) {
+      const dateStr = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(i).padStart(2, '0')}`;
+      const log = dateStr === today ? day : history.find(h => h.date === dateStr);
+      const score = log ? calcScore(log) : 0;
+      cells.push({ day: i, dateStr, score, isPerfect: score === 100, isToday: dateStr === today });
+    }
+    return cells;
+  })();
 
-  // 7 derniers jours pour les dots (style Liftoff)
-  // 7 jours lun→aujourd'hui
+  // 7 derniers jours
   const today7 = (() => {
     const now = new Date();
-    const dayOfWeek = now.getDay(); // 0=dim, 1=lun...
-    const daysFromMonday = (dayOfWeek + 6) % 7; // 0=lundi
+    const daysFromMon = (now.getDay() + 6) % 7;
     return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(now);
-      d.setDate(now.getDate() - daysFromMonday + i);
+      const d = new Date(now); d.setDate(now.getDate() - daysFromMon + i);
       const ds = d.toISOString().split('T')[0];
-      const isToday7 = ds === now.toISOString().split('T')[0];
-      const log = isToday7 ? day : history.find(h => h.date === ds);
+      const log = ds === today ? day : history.find(h => h.date === ds);
       const isFuture = d > now;
-      const done7 = !isFuture && log ? calcScore(log) >= 40 : false;
-      return { ds, dayName: ['L','M','M','J','V','S','D'][i], done: done7, isFuture };
+      return { ds, dayName: ['L','M','M','J','V','S','D'][i], done: !isFuture && log ? calcScore(log) >= 40 : false, isFuture };
     });
   })();
 
-  // Heatmap
-  const isCurrentMonth = selectedMonth === new Date().getMonth() && selectedYear === new Date().getFullYear();
-  const monthLabel     = new Date(selectedYear, selectedMonth, 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
-  const today          = new Date().toISOString().split('T')[0];
-  const cellSize       = Math.floor((width - 32 - 4 * 6) / 7);
-
-  const monthDays = (() => {
-    const lastDay = isCurrentMonth ? new Date().getDate() : new Date(selectedYear, selectedMonth + 1, 0).getDate();
-    return Array.from({ length: lastDay }, (_, i) => {
-      const dayNum = i + 1;
-      const dateStr = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
-      const log   = dateStr === today ? day : history.find(h => h.date === dateStr);
-      const score = log ? calcScore(log) : 0;
-      return { day: dayNum, dateStr, score, isPerfect: score === 100, isToday: dateStr === today };
-    });
-  })();
-
-  const firstDate     = history.length > 0 ? new Date(Math.min(...history.map(d => new Date(d.date).getTime()))) : new Date();
-  const isFirstMonth  = selectedMonth === firstDate.getMonth() && selectedYear === firstDate.getFullYear();
-
-  function goToPrevMonth() {
-    if (isFirstMonth) return;
-    if (selectedMonth === 0) { setSelectedMonth(11); setSelectedYear(y => y - 1); } else setSelectedMonth(m => m - 1);
-  }
-  function goToNextMonth() {
-    if (isCurrentMonth) return;
-    if (selectedMonth === 11) { setSelectedMonth(0); setSelectedYear(y => y + 1); } else setSelectedMonth(m => m + 1);
-  }
+  const monthLabel = new Date(selectedYear, selectedMonth, 1).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' }).toUpperCase();
+  const userName   = profile?.name ?? (isFemale ? 'Guerrière' : 'Guerrier');
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: C.bg }} edges={['top']}>
-      <ScrollView ref={scrollRef} showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16 }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: '#07060A' }} edges={[]}>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
 
-        {/* ── Hero Liftoff-style — overlay complet ── */}
-        <View style={{ marginHorizontal: -16, position: 'relative' }}>
-          {/* Personnage — tap = AvatarCreator */}
-          <TouchableOpacity onPress={() => setShowAvatarCreator(true)} activeOpacity={0.9}>
-            <AvatarHero config={avatarConfig} rankColor={rank.color} />
-          </TouchableOpacity>
+        {/* ── HERO ── */}
+        <View style={{ height: height * 0.5, position: 'relative', overflow: 'hidden' }}>
+          <Animated.Image source={HERO_IMG} style={{ width: '100%', height: '100%', transform: [{ scale: heroScale }, { scale: 1.5 }, { translateY: -110 }] }} resizeMode="cover" />
+          <LinearGradient colors={['transparent', 'rgba(7,6,10,0.3)', 'rgba(7,6,10,0.88)', '#07060A']} locations={[0.2, 0.5, 0.78, 1]} style={StyleSheet.absoluteFillObject} />
 
-          {/* Overlay nom + rang — en haut */}
-          <View style={{
-            position: 'absolute', top: 0, left: 0, right: 0,
-            flexDirection: 'row', alignItems: 'flex-start',
-            justifyContent: 'space-between',
-            paddingHorizontal: 20, paddingTop: 16,
-          }}>
-            <View>
-              <Text style={{ fontFamily: 'Cinzel', fontSize: 22, color: C.text, letterSpacing: 1,
-                textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8 }}>
-                {profile?.name ?? 'Guerrier'}
-              </Text>
-              <Text style={{ fontSize: 11, color: rank.color, marginTop: 3, letterSpacing: 1 }}>Niveau {rank.level}</Text>
-            </View>
-            <View style={{
-              width: 60, height: 60, borderRadius: 30,
-              backgroundColor: rank.color + '22', borderWidth: 2, borderColor: rank.color,
-              alignItems: 'center', justifyContent: 'center',
-              shadowColor: rank.color, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.6, shadowRadius: 12,
-            }}>
-              <Text style={{ fontFamily: 'Cinzel', fontSize: 8, color: rank.color, fontWeight: '700', textAlign: 'center', paddingHorizontal: 3 }}>
-                {rank.name}
-              </Text>
-            </View>
+          {/* Top icons */}
+          <View style={{ position: 'absolute', top: insets.top + 12, right: 16, flexDirection: 'row', gap: 10 }}>
+            <TouchableOpacity onPress={() => setShowSettings(true)} style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(0,0,0,0.5)', borderWidth: 1, borderColor: GOLD + '44', alignItems: 'center', justifyContent: 'center' }}>
+              <Image source={require('@/assets/ui/icone_parametres.png')} style={{ width: 34, height: 34, transform: [{ translateX: -1 }, { translateY: 1 }] }} resizeMode="contain" />
+            </TouchableOpacity>
+            <TouchableOpacity style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(0,0,0,0.5)', borderWidth: 1, borderColor: GOLD + '44', alignItems: 'center', justifyContent: 'center' }}>
+              <Image source={require('@/assets/ui/icone_notif.png')} style={{ width: 60, height: 60 }} resizeMode="contain" />
+            </TouchableOpacity>
           </View>
 
-          {/* Overlay XP bar — en bas sur le personnage */}
-          <View style={{
-            position: 'absolute', bottom: 0, left: 0, right: 0,
-            paddingHorizontal: 20, paddingBottom: 14,
-            backgroundColor: 'rgba(8,6,10,0.45)',
-          }}>
-            <XPBar totalXP={totalXP} />
+          {/* Label */}
+          <View style={{ position: 'absolute', top: insets.top + 18, left: 20, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={{ fontSize: 10, color: GOLD, letterSpacing: 3, textTransform: 'uppercase', fontWeight: '700' }}>PROFIL</Text>
           </View>
-        </View>
 
-        {/* ── Feature grid style Liftoff ── */}
-        <View style={{ backgroundColor: C.s1, borderTopWidth: 1, borderBottomWidth: 1, borderColor: C.s3, paddingVertical: 16, marginBottom: 20, marginHorizontal: -16 }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
-            {([
-              { icon: '🏆', label: 'Rangs',    onPress: () => setShowRanks(true) },
-              { icon: '🎖️', label: 'Médailles', onPress: () => setShowVoyage(true) },
-              { icon: '📅', label: 'Activité', onPress: () => heatmapRef.current?.measureLayout(scrollRef.current, (_x: number, y: number) => scrollRef.current?.scrollTo({ y: y - 20, animated: true }), () => {}) },
-              { icon: '⚡', label: 'Régularité', onPress: () => regulRef.current?.measureLayout(scrollRef.current, (_x: number, y: number) => scrollRef.current?.scrollTo({ y: y - 20, animated: true }), () => {}) },
-              { icon: '🔔', label: 'Notifs',   onPress: () => setShowNotifSettings(true) },
-              { icon: '⚙️', label: 'Paramètres', onPress: () => setShowSettings(true) },
-            ] as const).map((f, i) => (
-              <TouchableOpacity key={i} onPress={f.onPress} style={{ alignItems: 'center', gap: 6, width: (width - 16) / 6 }}>
-                <View style={{ width: 50, height: 50, borderRadius: 14, backgroundColor: C.s2, borderWidth: 1, borderColor: C.s3, alignItems: 'center', justifyContent: 'center' }}>
-                  <Text style={{ fontSize: 22 }}>{f.icon}</Text>
-                </View>
-                <Text style={{ fontSize: 9, color: C.dim, textAlign: 'center', lineHeight: 12 }}>{f.label}</Text>
-              </TouchableOpacity>
-            ))}
+          {/* Bas hero */}
+          <View style={{ position: 'absolute', bottom: 28, left: 20, right: 20 }}>
+            <Text style={{ fontFamily: 'Cinzel', fontSize: 38, color: C.text, fontWeight: '800', letterSpacing: 3, textTransform: 'uppercase' }}>{userName}</Text>
+            <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', fontStyle: 'italic', marginTop: 4 }}>
+              "Discipline aujourd'hui, liberté demain."
+            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10 }}>
+              <View style={{ width: 18, height: 18, borderRadius: 9, backgroundColor: GOLD + '33', borderWidth: 1, borderColor: GOLD, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ fontFamily: 'Cinzel', fontSize: 7, color: GOLD }}>A</Text>
+              </View>
+              <Text style={{ fontFamily: 'Cinzel', fontSize: 11, color: GOLD, letterSpacing: 2 }}>{rankDisplayName(rank.name, gender)}</Text>
+            </View>
           </View>
         </View>
 
         <View style={{ paddingHorizontal: 16 }}>
 
-        {/* ── Streak — 7 dots Liftoff ── */}
-        <View style={{ backgroundColor: streak >= 3 ? '#120A00' : C.s1, borderWidth: 1, borderColor: streak >= 3 ? GOLD + '44' : C.s3, borderRadius: 16, padding: 18, marginBottom: 14 }}>
-          {/* Header */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={{ fontSize: 18 }}>🔥</Text>
-              <Text style={{ fontFamily: 'Cinzel', fontSize: 14, color: C.text, letterSpacing: 1 }}>Streaks</Text>
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
-              <Text style={{ fontFamily: 'SpaceMono', fontSize: 28, color: streak > 0 ? GOLDB : C.dim }}>{streak}</Text>
-              <Text style={{ fontSize: 12, color: C.dim }}>j</Text>
-            </View>
-          </View>
-
-          {/* 7 dots */}
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
-            {today7.map((d, i) => (
-              <View key={i} style={{ alignItems: 'center', gap: 6 }}>
-                <Text style={{ fontSize: 9, color: C.dim }}>{d.dayName}</Text>
-                <View style={{
-                  width: 38, height: 38, borderRadius: 19,
-                  backgroundColor: d.done ? GOLD + '33' : C.s2,
-                  borderWidth: 2, borderColor: d.done ? GOLD : C.s3,
-                  alignItems: 'center', justifyContent: 'center',
-                  opacity: d.isFuture ? 0.3 : 1,
-                }}>
-                  {d.done && <Text style={{ fontSize: 14 }}>🔥</Text>}
-                </View>
+          {/* ── NIVEAU XP ── */}
+          <Animated.View style={[S(0), {
+            backgroundColor: '#0A0800', borderRadius: 20,
+            borderWidth: 1, borderColor: GOLD + '33', padding: 18, marginBottom: 14,
+          }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+              {/* Badge */}
+              <View style={{ alignItems: 'center', width: 64 }}>
+                <Image source={RANK_MEDALS[rankTierIndex] ?? RANK_MEDALS[1]} style={{ width: 64, height: 64 }} resizeMode="contain" />
+                <Text style={{ fontFamily: 'Cinzel', fontSize: 13, color: GOLD, fontWeight: '700', marginTop: 4 }}>NIV. {rank.level}</Text>
               </View>
-            ))}
-          </View>
-
-          {/* Record + progression + parfaits */}
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 14, borderTopWidth: 1, borderTopColor: C.s3 }}>
-            <View style={{ alignItems: 'center' }}>
-              <Text style={{ fontFamily: 'SpaceMono', fontSize: 22, color: GOLD }}>{bestStreak}</Text>
-              <Text style={{ fontSize: 9, color: C.dim, marginTop: 3, letterSpacing: 1 }}>RECORD</Text>
-            </View>
-            {nextMilestone ? (
-              <View style={{ flex: 1, paddingHorizontal: 16, justifyContent: 'center' }}>
-                <View style={{ height: 3, backgroundColor: C.s3, borderRadius: 2, overflow: 'hidden', marginBottom: 5 }}>
-                  <View style={{ height: 3, backgroundColor: GOLD, borderRadius: 2, width: `${Math.min(Math.round((streak / nextMilestone.days) * 100), 100)}%` as any }} />
-                </View>
-                <Text style={{ fontSize: 9, color: C.dim }}>{nextMilestone.days - streak}j → {nextMilestone.title}</Text>
+              {/* Info gauche */}
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 9, color: C.dim, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 2 }}>NIVEAU ACTUEL</Text>
+                <Text style={{ fontFamily: 'Cinzel', fontSize: 18, color: GOLDB, letterSpacing: 2 }}>{rankDisplayName(rank.name, gender)}</Text>
+                <XPFillBar
+                  totalXP={totalXP}
+                  level={rank.level}
+                  progress={getXPProgress(totalXP)}
+                  color={GOLD}
+                  height={8}
+                  style={{ marginTop: 8 }}
+                />
+                <Text style={{ fontSize: 9, color: C.dim, marginTop: 4 }}>{totalXP.toLocaleString()} / {nextRank ? nextRank.minXP.toLocaleString() : '—'} XP</Text>
               </View>
-            ) : <View style={{ flex: 1 }} />}
-            <View style={{ alignItems: 'center' }}>
-              <Text style={{ fontFamily: 'SpaceMono', fontSize: 22, color: perfectDays > 0 ? GOLDB : C.dim }}>{perfectDays}</Text>
-              <Text style={{ fontSize: 9, color: C.dim, marginTop: 3, letterSpacing: 1 }}>PARFAITS ✦</Text>
+              {/* Info droite */}
+              {nextRank && (
+                <View style={{ alignItems: 'flex-end' }}>
+                  <Text style={{ fontSize: 9, color: C.dim, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 4 }}>PROCHAIN</Text>
+                  <Image source={RANK_MEDALS[rankTierIndex + 1] ?? RANK_MEDALS[1]} style={{ width: 36, height: 36, marginBottom: 4 }} resizeMode="contain" />
+                  <Text style={{ fontFamily: 'Cinzel', fontSize: 11, color: nextRank.color + 'AA', letterSpacing: 1 }}>{rankDisplayName(nextRank.name, gender)}</Text>
+                  <Text style={{ fontSize: 9, color: C.dim, marginTop: 2 }}>{xpNeeded} XP</Text>
+                </View>
+              )}
             </View>
-          </View>
-        </View>
+          </Animated.View>
 
-        {/* ── Heatmap mensuelle ── */}
-        <View ref={heatmapRef}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, marginTop: 10 }}>
-          <TouchableOpacity onPress={goToPrevMonth} style={{ padding: 8, opacity: isFirstMonth ? 0.3 : 1 }}>
-            <Text style={{ color: GOLD, fontSize: 22 }}>‹</Text>
+          {/* ── TUILE MENTOR ── */}
+          <TouchableOpacity onPress={() => setShowMentor(true)} activeOpacity={0.7}>
+            <Animated.View style={[S(1), {
+              flexDirection: 'row', alignItems: 'center', gap: 14,
+              backgroundColor: '#0A0800', borderRadius: 16,
+              borderWidth: 1, borderColor: GOLD + '22',
+              padding: 14, marginBottom: 14,
+            }]}>
+              <Image
+                source={currentMentor.portrait}
+                style={{ width: 48, height: 48, borderRadius: 24 }}
+                resizeMode="cover"
+              />
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 9, color: C.dim, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 2 }}>TON MENTOR</Text>
+                <Text style={{ fontFamily: 'Cinzel', fontSize: 14, color: GOLDB, letterSpacing: 1 }}>{currentMentor.name}</Text>
+              </View>
+              <Text style={{ color: C.dim, fontSize: 18 }}>›</Text>
+            </Animated.View>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => setShowMonthPicker(true)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Text style={{ fontSize: 10, color: GOLD, letterSpacing: 3, textTransform: 'uppercase' }}>{monthLabel}</Text>
-            <Text style={{ color: GOLD, fontSize: 12 }}>▾</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={goToNextMonth} style={{ padding: 8, opacity: isCurrentMonth ? 0.3 : 1 }}>
-            <Text style={{ color: GOLD, fontSize: 22 }}>›</Text>
-          </TouchableOpacity>
-        </View>
 
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 8 }}>
-          {monthDays.map((d) => {
-            const op = d.score >= 80 ? 1 : d.score >= 50 ? 0.6 : d.score >= 20 ? 0.3 : 0;
-            return (
-              <View key={d.day} style={[
-                { width: cellSize, height: cellSize + 10, borderRadius: 6, alignItems: 'center', justifyContent: 'center', borderWidth: d.isToday ? 1.5 : 1 },
-                d.isPerfect ? {
-                  backgroundColor: GOLDB, borderColor: GOLDB,
-                  shadowColor: GOLD, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.9, shadowRadius: 8, elevation: 6,
-                } : {
-                  backgroundColor: op > 0 ? `rgba(201,168,76,${op})` : C.s2,
-                  borderColor: d.isToday ? '#FFFFFF' : C.s3,
-                },
-              ]}>
-                <Text style={{ fontSize: 10, fontWeight: d.isPerfect ? '800' : '600', color: d.isPerfect ? '#000' : op > 0 ? '#000' : d.isToday ? C.text : C.dim }}>
-                  {d.day}
+          {/* ── STREAK + RÉGULARITÉ ── */}
+          <Animated.View style={[S(1), { flexDirection: 'row', gap: 10, marginBottom: 14 }]}>
+            {/* Streak */}
+            <View style={{ flex: 1, backgroundColor: '#0A0800', borderRadius: 16, borderWidth: 1, borderColor: GOLD + '22', padding: 12 }}>
+              <StreakFlame
+                days={streak}
+                weekCompleted={today7.map(d => d.done)}
+                size={44}
+                horizontal
+              />
+              <Text style={{ fontSize: 9, color: C.dim, textAlign: 'center', marginTop: 8 }}>Meilleur : {bestStreak} jours</Text>
+              <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 3, marginTop: 6 }}>
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <Text key={i} style={{ fontSize: 12, opacity: i < shields ? 1 : 0.25 }}>🛡</Text>
+                ))}
+              </View>
+              {isPauseActive ? (
+                <TouchableOpacity onPress={() => setShowPauseModal(true)} style={{ marginTop: 8, alignItems: 'center' }}>
+                  <Text style={{ fontSize: 9, color: GOLD, fontWeight: '700' }}>En pause jusqu'au {pauseUntil}</Text>
+                  <Text style={{ fontSize: 8, color: C.dim, marginTop: 1 }}>Toucher pour annuler</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity onPress={() => setShowPauseModal(true)} style={{ marginTop: 8, alignItems: 'center' }}>
+                  <Text style={{ fontSize: 9, color: C.dim, textDecorationLine: 'underline' }}>Annoncer une pause</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+
+            {/* Régularité */}
+            <View style={{ flex: 1, backgroundColor: '#0A0800', borderRadius: 16, borderWidth: 1, borderColor: GOLD + '22', padding: 14 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <Text style={{ fontSize: 9, color: GOLD, letterSpacing: 2, textTransform: 'uppercase', fontWeight: '700' }}>RÉGULARITÉ</Text>
+                <TouchableOpacity onPress={() => setShowMonthPicker(true)} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Text style={{ fontSize: 9, color: C.dim }}>{monthLabel.slice(0,7)}</Text>
+                  <Text style={{ color: GOLD, fontSize: 9 }}>▾</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                {['L','M','M','J','V','S','D'].map((d, i) => (
+                  <Text key={i} style={{ fontSize: 8, color: C.dim, width: cellSize, textAlign: 'center' }}>{d}</Text>
+                ))}
+              </View>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 3 }}>
+                {monthDays.map((d, i) => (
+                  <View key={i} style={{
+                    width: cellSize, height: cellSize, borderRadius: 3,
+                    backgroundColor: d.empty ? 'transparent' : d.isPerfect ? GOLDB : d.score >= 70 ? GOLD + '88' : d.score >= 40 ? GOLD + '44' : d.score > 0 ? GOLD + '22' : 'rgba(255,255,255,0.06)',
+                    borderWidth: !d.empty && d.isToday ? 1 : 0, borderColor: GOLDB,
+                  }} />
+                ))}
+              </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
+                <Text style={{ fontSize: 7, color: C.dim }}>- actif</Text>
+                <View style={{ flexDirection: 'row', gap: 2 }}>
+                  {['rgba(255,255,255,0.06)', GOLD + '22', GOLD + '44', GOLD + '88', GOLDB].map((col, i) => (
+                    <View key={i} style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: col }} />
+                  ))}
+                </View>
+                <Text style={{ fontSize: 7, color: C.dim }}>+ actif</Text>
+              </View>
+            </View>
+          </Animated.View>
+
+          {/* ── SUCCÈS DÉVERROUILLÉS ── */}
+          <Animated.View style={[S(2), { marginBottom: 14 }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+              <Text style={{ fontSize: 11, color: GOLD, letterSpacing: 3, textTransform: 'uppercase', fontWeight: '700' }}>SUCCÈS DÉVERROUILLÉS</Text>
+              <TouchableOpacity onPress={() => setShowVoyage(true)}>
+                <Text style={{ fontSize: 10, color: C.dim }}>VOIR TOUT  ›</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 14, paddingRight: 8 }}>
+              {STREAK_MILESTONES.map((m: any, i: number) => {
+                const unlocked = bestStreak >= m.days || streak >= m.days || unlockedMilestones.has(m.days);
+                return (
+                  <View key={i} style={{ width: 68, alignItems: 'center', gap: 6 }}>
+                    <View style={{ opacity: unlocked ? 1 : 0.3 }}>
+                      <MedalBadge milestoneIndex={i} achieved={unlocked} size={56} />
+                    </View>
+                    <Text style={{ fontSize: 8, color: unlocked ? C.text : C.dim, textAlign: 'center', fontWeight: '600' }} numberOfLines={1}>
+                      {m.title}
+                    </Text>
+                    <Text style={{ fontSize: 7, color: unlocked ? GOLD : C.dim, textAlign: 'center' }}>
+                      {m.days} jours
+                    </Text>
+                  </View>
+                );
+              })}
+            </ScrollView>
+            <TouchableOpacity onPress={() => setShowAchievements(true)} style={{ marginTop: 10, alignSelf: 'flex-start' }}>
+              <Text style={{ fontSize: 10, color: GOLD, fontWeight: '700' }}>Voir les succès d'habitudes ›</Text>
+            </TouchableOpacity>
+          </Animated.View>
+
+          {/* ── JOURNAL RAPIDE ── */}
+          <Animated.View style={[S(3), { marginBottom: 14 }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+              <Text style={{ fontSize: 11, color: GOLD, letterSpacing: 3, textTransform: 'uppercase', fontWeight: '700' }}>JOURNAL RAPIDE</Text>
+              <TouchableOpacity onPress={() => router.push('/journal-history')}>
+                <Text style={{ fontSize: 10, color: C.dim }}>VOIR TOUT  ›</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={{ backgroundColor: '#0A0800', borderRadius: 16, borderWidth: 1, borderColor: GOLD + '22', padding: 16, flexDirection: 'row', gap: 14, alignItems: 'flex-start' }}>
+              <Image source={require('@/assets/ui/journal_rapide_thumb.png')} style={{ width: 56, height: 56, borderRadius: 10, borderWidth: 1, borderColor: GOLD + '33' }} resizeMode="cover" />
+              <View style={{ flex: 1 }}>
+                <TextInput
+                  style={{ fontSize: 14, color: C.text, lineHeight: 22, fontStyle: 'italic', padding: 0, minHeight: 44 }}
+                  value={journalText}
+                  onChangeText={onJournalChange}
+                  placeholder="Ce que j'ai accompli aujourd'hui..."
+                  placeholderTextColor="rgba(255,255,255,0.25)"
+                  multiline
+                />
+                <Text style={{ fontSize: 10, color: C.dim, marginTop: 8, letterSpacing: 1 }}>
+                  {new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' }).toUpperCase()}
                 </Text>
-                {d.isPerfect && <Text style={{ fontSize: 6, color: '#000', lineHeight: 8 }}>✦</Text>}
               </View>
-            );
-          })}
-        </View>
-
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-          <Text style={{ fontSize: 10, color: C.dim }}>Moins actif</Text>
-          <View style={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
-            {[0, 0.3, 0.6, 1].map((op, i) => (
-              <View key={i} style={{ width: 14, height: 14, borderRadius: 3, backgroundColor: op > 0 ? `rgba(201,168,76,${op})` : C.s2 }} />
-            ))}
-            <View style={{ width: 1, height: 14, backgroundColor: C.s3, marginHorizontal: 4 }} />
-            <View style={{ width: 14, height: 14, borderRadius: 3, backgroundColor: GOLDB, shadowColor: GOLD, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 4 }}>
-              <Text style={{ fontSize: 6, color: '#000', textAlign: 'center', lineHeight: 14 }}>✦</Text>
             </View>
-            <Text style={{ fontSize: 9, color: C.dim }}>Parfait</Text>
-          </View>
-          <Text style={{ fontSize: 10, color: C.dim }}>Plus actif</Text>
-        </View>
+          </Animated.View>
 
-        {/* Voyage AEGIS — accessible via bouton Médailles */}
-        </View>
-        <View ref={regulRef}>
-        {/* ── Régularité habitudes ── */}
-        <Text style={styles.sectionTitle}>Régularité</Text>
-        <View style={{ backgroundColor: C.s1, borderWidth: 1, borderColor: C.s3, borderRadius: 16, padding: 18, gap: 16, marginBottom: 24 }}>
-          {habitStats.map(h => {
-            const col = h.pct >= 70 ? C.green : h.pct >= 40 ? GOLD : C.red;
-            return (
-              <View key={h.key}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-                  <Text style={{ fontSize: 16 }}>{h.icon}</Text>
-                  <Text style={{ fontSize: 13, color: h.pct >= 70 ? C.text : C.dim, flex: 1, fontWeight: h.pct >= 70 ? '600' : '400' }}>{h.label}</Text>
-                  <Text style={{ fontFamily: 'SpaceMono', fontSize: 11, color: col }}>{h.pct}%</Text>
-                </View>
-                <View style={{ height: 5, backgroundColor: C.s3, borderRadius: 3, overflow: 'hidden' }}>
-                  <View style={{ height: '100%', borderRadius: 3, width: `${h.pct}%` as any, backgroundColor: col }} />
-                </View>
+          {/* ── STATISTIQUES GLOBALES ── */}
+          <Animated.View style={[S(4), { marginBottom: 14 }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+              <Text style={{ fontSize: 11, color: GOLD, letterSpacing: 3, textTransform: 'uppercase', fontWeight: '700' }}>STATISTIQUES GLOBALES</Text>
+              <Text style={{ fontSize: 9, color: C.dim, letterSpacing: 1 }}>DEPUIS LE DÉBUT</Text>
+            </View>
+            <View style={{ backgroundColor: '#0A0800', borderRadius: 16, borderWidth: 1, borderColor: GOLD + '22', padding: 20, alignSelf: 'center', width: '88%' }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                {[
+                  { icon: require('@/assets/ui/icone_stat_seances.png'), value: history.filter(d => (d as any).workout_done).length, label: 'SÉANCES', sub: 'Complétées' },
+                  { icon: require('@/assets/ui/icone_stat_streak.png'), value: bestStreak, label: 'JOURS',   sub: 'Streak max' },
+                  { icon: require('@/assets/ui/icone_stat_succes.png'), value: STREAK_MILESTONES.filter((m: any) => bestStreak >= m.days || streak >= m.days || unlockedMilestones.has(m.days)).length, label: 'SUCCÈS', sub: 'Déverrouillés' },
+                  { icon: require('@/assets/ui/icone_stat_regularite.png'), value: `${avgRegularity}%`, label: 'RÉGULARITÉ', sub: 'Moyenne' },
+                ].map((stat, i) => (
+                  <View key={i} style={{ alignItems: 'center', flex: 1, paddingTop: 44, position: 'relative' }}>
+                    <Image source={stat.icon} style={{ position: 'absolute', top: -4, width: 48, height: 48 }} resizeMode="contain" />
+                    <Text style={{ fontFamily: 'SpaceMono', fontSize: 18, color: C.text, fontWeight: '700' }}>{stat.value}</Text>
+                    <Text style={{ fontSize: 8, color: GOLD, letterSpacing: 1, textTransform: 'uppercase', marginTop: 3, textAlign: 'center' }}>{stat.label}</Text>
+                    <Text style={{ fontSize: 7, color: C.dim, textAlign: 'center', marginTop: 1 }}>{stat.sub}</Text>
+                  </View>
+                ))}
               </View>
-            );
-          })}
-        </View>
+            </View>
+          </Animated.View>
 
-        </View>
-        {/* ── Rangs accordéon ── */}
-        <View ref={ranksRef}>
-        <Text style={styles.sectionTitle}>Rangs</Text>
-        <RanksAccordion rank={rank} totalXP={totalXP} />
-        </View>
+          {/* ── RÉGULARITÉ HABITUDES ── */}
+          <Animated.View style={[S(5), { marginBottom: 14 }]}>
+            <Text style={{ fontSize: 11, color: GOLD, letterSpacing: 3, textTransform: 'uppercase', fontWeight: '700', marginBottom: 12 }}>RÉGULARITÉ HABITUDES</Text>
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 14 }}>
+              {([
+                ['week', 'CETTE SEMAINE'], ['month', 'CE MOIS'], ['6months', '6 DERNIERS MOIS'], ['year', 'CETTE ANNÉE'], ['all', 'TOUT'],
+              ] as [typeof statsRange, string][]).map(([key, label]) => (
+                <TouchableOpacity
+                  key={key}
+                  onPress={() => setStatsRange(key)}
+                  style={{
+                    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10,
+                    backgroundColor: statsRange === key ? GOLD + '22' : 'rgba(255,255,255,0.04)',
+                    borderWidth: 1, borderColor: statsRange === key ? GOLD : 'rgba(255,255,255,0.1)',
+                  }}
+                >
+                  <Text style={{ fontSize: 10, fontWeight: '700', color: statsRange === key ? GOLD : C.dim }}>{label}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <View style={{ backgroundColor: '#0A0800', borderRadius: 16, borderWidth: 1, borderColor: GOLD + '22', padding: 18, gap: 16 }}>
+              {habitStats.map(h => {
+                const col = h.pct >= 70 ? C.green : h.pct >= 40 ? GOLD : C.red;
+                return (
+                  <View key={h.key}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                      <Text style={{ fontSize: 13, color: h.pct >= 70 ? C.text : C.dim, flex: 1, fontWeight: h.pct >= 70 ? '600' : '400' }}>{h.label}</Text>
+                      <Text style={{ fontFamily: 'SpaceMono', fontSize: 11, color: col }}>{h.pct}%</Text>
+                    </View>
+                    <View style={{ height: 4, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden' }}>
+                      <View style={{ height: '100%', borderRadius: 2, width: `${h.pct}%` as any, backgroundColor: col }} />
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          </Animated.View>
 
         </View>
       </ScrollView>
 
+      {/* Modals */}
       {showEdit && <EditProfileModal profile={profile} onClose={() => setShowEdit(false)} onSave={updateProfile} />}
 
       <Modal visible={showRanks} animationType="slide" presentationStyle="fullScreen">
-        <RanksScreen onClose={() => setShowRanks(false)} />
+        <RanksScreen onClose={() => setShowRanks(false)} isInDanger={inactivity.isInDanger} initialRankLevel={rank.level} />
       </Modal>
 
-      <VoyageModal
-        visible={showVoyage}
-        onClose={() => setShowVoyage(false)}
-        milestones={STREAK_MILESTONES}
-        streak={streak}
-        bestStreak={bestStreak}
-        unlockedSet={unlockedMilestones}
-      />
+      <VoyageModal visible={showVoyage} onClose={() => setShowVoyage(false)}
+        milestones={STREAK_MILESTONES} streak={streak} bestStreak={bestStreak}
+        unlockedSet={unlockedMilestones} gender={gender} />
 
-      {/* Modal Paramètres */}
+      <AchievementsScreen visible={showAchievements} onClose={() => setShowAchievements(false)} userId={user?.id} />
+
+      <SoundSettingsScreen visible={showSoundSettings} onClose={() => setShowSoundSettings(false)} />
+
       <Modal visible={showSettings} animationType="slide" presentationStyle="pageSheet">
         <View style={{ flex: 1, backgroundColor: C.bg }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderBottomWidth: 1, borderBottomColor: C.s3 }}>
@@ -571,63 +729,89 @@ export default function ProfileScreen() {
             <Text style={{ fontFamily: 'Cinzel', fontSize: 15, color: GOLDB, letterSpacing: 2 }}>PARAMÈTRES</Text>
             <View style={{ width: 60 }} />
           </View>
-          <ScrollView contentContainerStyle={{ padding: 0 }}>
-            <View style={{ backgroundColor: C.s1, borderBottomWidth: 1, borderTopWidth: 1, borderColor: C.s3, overflow: 'hidden', marginBottom: 24 }}>
-              <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', padding: 18, borderBottomWidth: 1, borderBottomColor: C.s3 }} onPress={() => { setShowSettings(false); setTimeout(() => setShowEdit(true), 300); }}>
-                <Text style={{ fontSize: 18, marginRight: 14 }}>👤</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 14, color: C.text, fontWeight: '600' }}>{profile?.name ?? 'Guerrier'}</Text>
-                  <Text style={{ fontSize: 11, color: C.dim, marginTop: 1 }}>{user?.email}</Text>
-                </View>
-                <Text style={{ color: C.dim, fontSize: 18 }}>›</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', padding: 18, borderBottomWidth: 1, borderBottomColor: C.s3 }} onPress={() => { setShowSettings(false); setTimeout(() => setShowAvatarCreator(true), 300); }}>
-                <Text style={{ fontSize: 18, marginRight: 14 }}>🧬</Text>
-                <Text style={{ fontSize: 14, color: C.text, flex: 1 }}>Personnaliser l'avatar</Text>
-                <Text style={{ color: C.dim, fontSize: 18 }}>›</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={{ flexDirection: 'row', alignItems: 'center', padding: 18, borderBottomWidth: 1, borderBottomColor: C.s3 }} onPress={() => { setShowSettings(false); setTimeout(() => setShowNotifSettings(true), 300); }}>
-                <Text style={{ fontSize: 18, marginRight: 14 }}>🔔</Text>
-                <Text style={{ fontSize: 14, color: C.text, flex: 1 }}>Notifications</Text>
-                <Text style={{ color: C.dim, fontSize: 18 }}>›</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={{ flexDirection: 'row', alignItems: 'center', padding: 18, borderTopWidth: 1, borderTopColor: C.s3 }}
-                onPress={() => {
-                  setShowSettings(false);
-                  setTimeout(() => Alert.alert(
-                    "Revoir l'onboarding",
-                    "Réinitialiser l'onboarding pour le revoir ?",
-                    [
+          <ScrollView contentContainerStyle={{ paddingVertical: 16 }}>
+            {[
+              {
+                title: 'COMPTE',
+                items: [
+                  { icon: require('@/assets/ui/icone_param_profil.png'), label: profile?.name ?? 'Profil', sub: user?.email, onPress: () => { setShowSettings(false); setTimeout(() => setShowEdit(true), 300); } },
+                  { icon: require('@/assets/ui/icone_param_genre.png'), label: 'Genre', onPress: () => { setShowSettings(false); setTimeout(() => Alert.alert('Bientôt disponible', 'Le changement de genre (Krios/Aspasia) sera disponible prochainement.'), 300); } },
+                  { icon: require('@/assets/ui/icone_param_mdp.png'), label: 'Mot de passe', onPress: () => { setShowSettings(false); setTimeout(() => Alert.alert('Bientôt disponible', 'La modification du mot de passe sera disponible prochainement.'), 300); } },
+                ],
+              },
+              {
+                title: 'EXPÉRIENCE',
+                items: [
+                  { icon: require('@/assets/ui/icone_param_notif.png'), label: 'Notifications', onPress: () => { setShowSettings(false); setTimeout(() => setShowNotifSettings(true), 300); } },
+                  { icon: require('@/assets/ui/icone_param_voix.png'), label: 'Ambiance sonore', sub: 'Musique de fond par page', type: 'toggle', value: ambientEnabled, onToggle: setAmbientEnabled },
+                  { icon: require('@/assets/ui/icone_param_voix.png'), label: 'Volume des sons', sub: 'Régler chaque effet sonore', onPress: () => { setShowSettings(false); setTimeout(() => setShowSoundSettings(true), 300); } },
+                  { icon: require('@/assets/ui/icone_param_voix.png'), label: 'Voix & narration', sub: 'Krios & Aspasia', onPress: () => { setShowSettings(false); setTimeout(() => Alert.alert('Bientôt disponible', 'Les réglages de voix seront disponibles prochainement.'), 300); } },
+                  { icon: require('@/assets/ui/icone_param_onboarding.png'), label: "Revoir l'onboarding", dim: true, onPress: () => {
+                    setShowSettings(false);
+                    setTimeout(() => Alert.alert("Revoir l'onboarding", "Réinitialiser ?", [
                       { text: 'Annuler', style: 'cancel' },
-                      { text: 'Réinitialiser', onPress: async () => {
-                        const { supabase } = await import('@/lib/supabase');
-                        await supabase.from('profiles').update({ onboarding_done: false }).eq('id', user?.id);
-                        Alert.alert('Done', "Relance l'app pour voir l'onboarding.");
-                      }},
-                    ]
-                  ), 300);
-                }}
-              >
-                <Text style={{ fontSize: 18, marginRight: 14 }}>🔄</Text>
-                <Text style={{ fontSize: 14, color: C.dim, flex: 1 }}>Revoir l'onboarding</Text>
-                <Text style={{ color: C.dim, fontSize: 18 }}>›</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={{ flexDirection: 'row', alignItems: 'center', padding: 18 }}
-                onPress={() => { setShowSettings(false); setTimeout(() => Alert.alert('Déconnexion', 'Quitter AEGIS ?', [{ text: 'Annuler', style: 'cancel' }, { text: 'Déconnecter', style: 'destructive', onPress: signOut }]), 300); }}
-              >
-                <Text style={{ fontSize: 18, marginRight: 14 }}>🚪</Text>
-                <Text style={{ fontSize: 14, color: C.red, flex: 1 }}>Se déconnecter</Text>
-                <Text style={{ color: C.dim, fontSize: 18 }}>›</Text>
-              </TouchableOpacity>
-            </View>
+                      { text: 'Réinitialiser', onPress: async () => { await supabase.from('profiles').update({ onboarding_done: false }).eq('id', user?.id); } },
+                    ]), 300);
+                  }},
+                ],
+              },
+              {
+                title: 'PROGRESSION',
+                items: [
+                  { icon: require('@/assets/ui/icone_param_rangs.png'), label: 'Mes rangs', onPress: () => { setShowSettings(false); setTimeout(() => setShowRanks(true), 300); } },
+                ],
+              },
+              {
+                title: 'SUPPORT',
+                items: [
+                  { icon: require('@/assets/ui/icone_param_aide.png'), label: 'Aide & contact', onPress: () => { setShowSettings(false); setTimeout(() => Alert.alert('Bientôt disponible', "La page d'aide sera disponible prochainement."), 300); } },
+                  { icon: require('@/assets/ui/icone_param_note.png'), label: 'Noter AEGIS', onPress: () => { setShowSettings(false); setTimeout(() => Alert.alert('Bientôt disponible', "L'app n'est pas encore sur les stores."), 300); } },
+                  { icon: require('@/assets/ui/icone_param_confidentialite.png'), label: 'Confidentialité & conditions', onPress: () => { setShowSettings(false); setTimeout(() => Alert.alert('Bientôt disponible', 'Ces pages seront disponibles prochainement.'), 300); } },
+                ],
+              },
+              {
+                title: 'ZONE SENSIBLE',
+                items: [
+                  { icon: require('@/assets/ui/icone_param_deconnexion.png'), label: 'Se déconnecter', red: true, onPress: () => { setShowSettings(false); setTimeout(() => Alert.alert('Déconnexion', '', [{ text: 'Annuler', style: 'cancel' }, { text: 'Déconnecter', style: 'destructive', onPress: signOut }]), 300); } },
+                  { icon: require('@/assets/ui/icone_param_supprimer.png'), label: 'Supprimer mon compte', red: true, onPress: () => { setShowSettings(false); setTimeout(handleDeleteAccount, 300); } },
+                ],
+              },
+            ].map((section, si) => (
+              <View key={si} style={{ marginBottom: 20 }}>
+                <Text style={{ fontSize: 10, color: GOLD, letterSpacing: 2, textTransform: 'uppercase', fontWeight: '700', marginHorizontal: 16, marginBottom: 8 }}>
+                  {section.title}
+                </Text>
+                <View style={{ backgroundColor: C.s1, borderWidth: 1, borderColor: C.s3, overflow: 'hidden', marginHorizontal: 16, borderRadius: 14 }}>
+                  {section.items.map((item, i, arr) => {
+                    const isToggle = (item as any).type === 'toggle';
+                    const Wrapper = isToggle ? View : TouchableOpacity;
+                    return (
+                      <Wrapper key={i} style={{ flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: i < arr.length - 1 ? 1 : 0, borderBottomColor: C.s3 }} {...(!isToggle ? { onPress: item.onPress } : {})}>
+                        <Image source={item.icon} style={{ width: 22, height: 22, marginRight: 14 }} resizeMode="contain" />
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 14, color: (item as any).red ? C.red : (item as any).dim ? C.dim : C.text, fontWeight: '500' }}>{item.label}</Text>
+                          {(item as any).sub && <Text style={{ fontSize: 11, color: C.dim, marginTop: 1 }}>{(item as any).sub}</Text>}
+                        </View>
+                        {isToggle ? (
+                          <Switch
+                            value={(item as any).value}
+                            onValueChange={(item as any).onToggle}
+                            trackColor={{ false: C.s3, true: GOLD + '66' }}
+                            thumbColor={(item as any).value ? GOLD : '#888'}
+                          />
+                        ) : (
+                          <Text style={{ color: C.dim, fontSize: 18 }}>›</Text>
+                        )}
+                      </Wrapper>
+                    );
+                  })}
+                </View>
+              </View>
+            ))}
           </ScrollView>
         </View>
       </Modal>
 
-      {/* Modal Notifications */}
       <Modal visible={showNotifSettings} animationType="slide" presentationStyle="pageSheet">
         <View style={{ flex: 1, backgroundColor: C.bg }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderBottomWidth: 1, borderBottomColor: C.s3 }}>
@@ -640,23 +824,70 @@ export default function ProfileScreen() {
           </ScrollView>
         </View>
       </Modal>
-      {showMonthPicker && <MonthPickerModal current={{ month: selectedMonth, year: selectedYear }} history={history} onSelect={(m, y) => { setSelectedMonth(m); setSelectedYear(y); }} onClose={() => setShowMonthPicker(false)} />}
-      <AvatarCreator visible={showAvatarCreator} initial={avatarConfig} onSave={setAvatarConfig} onClose={() => setShowAvatarCreator(false)} />
 
+      {showMonthPicker && <MonthPickerModal current={{ month: selectedMonth, year: selectedYear }} history={history} createdAt={user?.created_at} onSelect={(m: number, y: number) => { setSelectedMonth(m); setSelectedYear(y); }} onClose={() => setShowMonthPicker(false)} />}
+
+      <PauseModal
+        visible={showPauseModal}
+        onClose={() => setShowPauseModal(false)}
+        onStart={startPause}
+        onCancel={cancelPause}
+        isPauseActive={isPauseActive}
+        pauseUntil={pauseUntil}
+      />
+
+      <MentorScreen
+        visible={showMentor}
+        onClose={() => setShowMentor(false)}
+        mentorId={mentorId}
+        onSelectMentor={setMentorId}
+        gender={gender}
+        userId={user?.id}
+      />
     </SafeAreaView>
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
-  sectionTitle:  { fontSize: 10, color: GOLD, letterSpacing: 3, textTransform: 'uppercase', marginBottom: 12, marginTop: 4 },
-  milestoneRow:  { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: C.s1, borderWidth: 1, borderColor: C.s3, borderRadius: 14, padding: 14 },
-});
+function PauseModal({ visible, onClose, onStart, onCancel, isPauseActive, pauseUntil }: {
+  visible: boolean; onClose: () => void; onStart: (days: number) => void; onCancel: () => void;
+  isPauseActive: boolean; pauseUntil: string | null;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', justifyContent: 'flex-end' }}>
+        <View style={{ backgroundColor: '#0A0800', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, borderColor: '#C9A84C33', padding: 20, paddingBottom: 40 }}>
+          <Text style={{ fontFamily: 'Cinzel', fontSize: 16, color: '#E8C46A', fontWeight: '700', marginBottom: 8 }}>
+            {isPauseActive ? 'Pause en cours' : 'Annoncer une pause'}
+          </Text>
+          <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.5)', lineHeight: 18, marginBottom: 20 }}>
+            {isPauseActive
+              ? `Ta série est gelée jusqu'au ${pauseUntil}. Reviens quand tu veux, rien ne sera perdu.`
+              : "Pars l'esprit tranquille. Le temps de ta pause ne comptera pas contre ta série — ce n'est pas un abandon, juste un chapitre qui attend."}
+          </Text>
 
-const edit = StyleSheet.create({
-  label:        { fontSize: 10, color: C.dim, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 8 },
-  sectionTitle: { fontFamily: 'Cinzel', fontSize: 14, color: GOLD, letterSpacing: 2, marginTop: 24, marginBottom: 16 },
-  input:        { backgroundColor: C.s2, borderWidth: 1, borderColor: C.s3, borderRadius: 10, padding: 14, color: C.text, fontSize: 15, marginBottom: 16 },
-  inputRow:     { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 },
-  unit:         { color: C.dim, fontSize: 13, width: 36 },
-});
+          {isPauseActive ? (
+            <TouchableOpacity onPress={() => { onCancel(); onClose(); }} style={{ backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 12, padding: 14, alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
+              <Text style={{ color: '#8a8a8a', fontWeight: '700', fontSize: 13 }}>JE SUIS DE RETOUR</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              {[3, 7, 14].map(days => (
+                <TouchableOpacity
+                  key={days}
+                  onPress={() => { onStart(days); onClose(); }}
+                  style={{ flex: 1, backgroundColor: '#C9A84C22', borderRadius: 12, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: '#C9A84C55' }}
+                >
+                  <Text style={{ color: '#E8C46A', fontWeight: '700', fontSize: 16 }}>{days}j</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          <TouchableOpacity onPress={onClose} style={{ marginTop: 14, alignItems: 'center' }}>
+            <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>Fermer</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}

@@ -14,20 +14,20 @@ Notifications.setNotificationHandler({
 
 // ─── 14 messages matin ───────────────────────────────────────────────────────
 const MORNING_MESSAGES = [
-  { title: '🌅 AEGIS', body: "Nouvelle journée. Nouvelle opportunité de devenir meilleur." },
-  { title: '🌅 AEGIS', body: "Commence par l'eau. Commence par la routine. Commence." },
-  { title: '🌅 AEGIS', body: "Ton futur moi te regarde. Que voit-il aujourd'hui ?" },
-  { title: '🌅 AEGIS', body: "Les champions se lèvent avec intention. C'est ton heure." },
-  { title: '🌅 AEGIS', body: "Une matinée gagnée, c'est une journée gagnée." },
-  { title: '🌅 AEGIS', body: "Aujourd'hui tu peux faire quelque chose que tu ne pouvais pas hier." },
-  { title: '🌅 AEGIS', body: "Petit à petit, l'oiseau fait son nid. Chaque jour compte." },
-  { title: '🌅 AEGIS', body: "Discipline le matin. Liberté le soir." },
-  { title: '🌅 AEGIS', body: "Ce que tu fais en silence construit ta réputation en public." },
-  { title: '🌅 AEGIS', body: "Lève-toi avec intention. Tout commence là." },
-  { title: '🌅 AEGIS', body: "Identity is repetition. Show up again today." },
-  { title: '🌅 AEGIS', body: "Win the morning, win the day." },
-  { title: '🌅 AEGIS', body: "Consistency compounds. Une journée de plus." },
-  { title: '🌅 AEGIS', body: "Le corps obéit à l'esprit. Entraîne les deux dès maintenant." },
+  { title: '✦ AEGIS', body: "Nouvelle journée. Nouvelle opportunité de devenir meilleur." },
+  { title: '✦ AEGIS', body: "Commence par l'eau. Commence par la routine. Commence." },
+  { title: '✦ AEGIS', body: "Ton futur moi te regarde. Que voit-il aujourd'hui ?" },
+  { title: '✦ AEGIS', body: "Les champions se lèvent avec intention. C'est ton heure." },
+  { title: '✦ AEGIS', body: "Une matinée gagnée, c'est une journée gagnée." },
+  { title: '✦ AEGIS', body: "Aujourd'hui tu peux faire quelque chose que tu ne pouvais pas hier." },
+  { title: '✦ AEGIS', body: "Petit à petit, l'oiseau fait son nid. Chaque jour compte." },
+  { title: '✦ AEGIS', body: "Discipline le matin. Liberté le soir." },
+  { title: '✦ AEGIS', body: "Ce que tu fais en silence construit ta réputation en public." },
+  { title: '✦ AEGIS', body: "Lève-toi avec intention. Tout commence là." },
+  { title: '✦ AEGIS', body: "Identity is repetition. Show up again today." },
+  { title: '✦ AEGIS', body: "Win the morning, win the day." },
+  { title: '✦ AEGIS', body: "Consistency compounds. Une journée de plus." },
+  { title: '✦ AEGIS', body: "Le corps obéit à l'esprit. Entraîne les deux dès maintenant." },
 ];
 
 // ─── 14 messages soir ────────────────────────────────────────────────────────
@@ -39,13 +39,13 @@ const EVENING_MESSAGES = [
   { title: '⚡ AEGIS', body: "Chaque habitude cochée est une brique de ton empire." },
   { title: '⚡ AEGIS', body: "Discipline maintenant. Liberté demain." },
   { title: '⚡ AEGIS', body: "Le confort d'aujourd'hui ou la fierté de demain. À toi de choisir." },
-  { title: '🌙 AEGIS', body: "Avant de dormir — as-tu fait ce que tu t'étais promis ?" },
-  { title: '🌙 AEGIS', body: "Earn your rest. Vérifie tes habitudes." },
-  { title: '🌙 AEGIS', body: "Ce soir compte. Ouvre AEGIS pour voir où tu en es." },
-  { title: '🌙 AEGIS', body: "Standards don't take evenings off." },
-  { title: '🌙 AEGIS', body: "Ta journée se termine. Ta discipline, elle, ne dort pas." },
-  { title: '🌙 AEGIS', body: "Check tes habitudes. Dors avec la conscience tranquille." },
-  { title: '🌙 AEGIS', body: "Il reste peut-être une habitude. Une seule. Fais-la." },
+  { title: '☽ AEGIS', body: "Avant de dormir — as-tu fait ce que tu t'étais promis ?" },
+  { title: '☽ AEGIS', body: "Earn your rest. Vérifie tes habitudes." },
+  { title: '☽ AEGIS', body: "Ce soir compte. Ouvre AEGIS pour voir où tu en es." },
+  { title: '☽ AEGIS', body: "Standards don't take evenings off." },
+  { title: '☽ AEGIS', body: "Ta journée se termine. Ta discipline, elle, ne dort pas." },
+  { title: '☽ AEGIS', body: "Check tes habitudes. Dors avec la conscience tranquille." },
+  { title: '☽ AEGIS', body: "Il reste peut-être une habitude. Une seule. Fais-la." },
 ];
 
 export async function requestNotificationPermission(): Promise<boolean> {
@@ -115,13 +115,19 @@ export async function cancelAllNotifications() {
 
 // ─── Reschedule automatique chaque semaine ────────────────────────────────────
 // À appeler au lancement de l'app — reschedule si la semaine a changé
+let _rescheduling = false; // verrou contre les appels simultanés
+
 export async function autoRescheduleIfNeeded(userId: string) {
+  if (_rescheduling) return;
+  _rescheduling = true;
   try {
     const weekKey = `@aegis:notif_week_${getWeekNumber()}`;
     const done = await AsyncStorage.getItem(weekKey);
-    if (done) return; // déjà reschedulé cette semaine
+    if (done) return;
 
-    // Récupère les prefs depuis Supabase
+    // Marque immédiatement pour bloquer tout appel concurrent
+    await AsyncStorage.setItem(weekKey, 'true');
+
     const { data } = await supabase
       .from('profiles')
       .select('notif_morning, notif_morning_hour, notif_morning_minute, notif_evening, notif_evening_hour, notif_evening_minute')
@@ -134,9 +140,9 @@ export async function autoRescheduleIfNeeded(userId: string) {
       data.notif_morning,     data.notif_morning_hour, data.notif_morning_minute,
       data.notif_evening,     data.notif_evening_hour, data.notif_evening_minute,
     );
-
-    await AsyncStorage.setItem(weekKey, 'true');
-  } catch {}
+  } catch {} finally {
+    _rescheduling = false;
+  }
 }
 
 function getWeekNumber(): string {

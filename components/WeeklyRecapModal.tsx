@@ -225,7 +225,7 @@ export default function WeeklyRecapModal({ visible, data, onClose }: Props) {
             transform: [{ scale: btnAnim.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1] }) }],
           }}>
             <TouchableOpacity style={styles.btn} onPress={onClose} activeOpacity={0.8}>
-              <Text style={styles.btnText}>CONTINUER ⚔️</Text>
+              <Text style={styles.btnText}>CONTINUER ⚔</Text>
             </TouchableOpacity>
           </Animated.View>
 

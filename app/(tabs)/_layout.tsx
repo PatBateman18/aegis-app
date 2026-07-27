@@ -2,6 +2,8 @@ import { Tabs } from 'expo-router';
 import { Image } from 'react-native';
 import { C } from '@/constants/colors';
 
+const GOLD = '#C9A84C';
+
 const ICONS = {
   accueil: require('@/assets/tabs/tab_accueil2.png'),
   corps:   require('@/assets/tabs/tab_corps.png'),
@@ -26,14 +28,15 @@ export default function TabsLayout() {
     <Tabs
       screenOptions={{
         headerShown: false,
+        // Barre classique, pleine largeur, collée en bas — mais dans le langage AEGIS
         tabBarStyle: {
-          backgroundColor: C.s1,
-          borderTopColor: C.s3,
+          backgroundColor: '#0A0800',
+          borderTopColor: GOLD + '33',
           borderTopWidth: 1,
           height: 65,
           paddingBottom: 10,
         },
-        tabBarActiveTintColor: C.gold,
+        tabBarActiveTintColor: GOLD,
         tabBarInactiveTintColor: C.dim,
         tabBarLabelStyle: {
           fontSize: 9,

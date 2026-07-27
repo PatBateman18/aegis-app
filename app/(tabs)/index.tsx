@@ -1,23 +1,26 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, Image, Dimensions, ActivityIndicator,
-  Animated, Easing, Modal, TextInput,
+  StyleSheet, Image, Dimensions, Animated,
+  Easing, TextInput, ActivityIndicator,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import EveningSummary from '@/components/EveningSummary';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '@/hooks/useAuth';
 import { useDay } from '@/hooks/useDay';
-import { Card, SectionTitle, ScoreRing, Inp, ToggleRow, ActionRow } from '@/components/ui';
-import { XPBar, RankBadge } from '@/components/XPBar';
+import { useStreakShields } from '@/hooks/useStreakShields';
+import { usePause } from '@/hooks/usePause';
+import { useAmbientSound } from '@/hooks/useAmbientSound';
+import { useInactivity } from '@/hooks/useInactivity';
 import { C } from '@/constants/colors';
 import { HABIT_KEYS, HABIT_LABELS, calcScore } from '@/constants/types';
 import {
-  calcTotalXP, calcDayXP, getRank,
-  QUOTES, getCurrentMilestone, getNextMilestone,
+  calcTotalXP, calcDayXP, getRank, getXPProgress, RANKS,
+  getCurrentMilestone, getNextMilestone, STREAK_MILESTONES,
 } from '@/constants/rpg';
 import { supabase } from '@/lib/supabase';
 import WeeklyRecapModal from '@/components/WeeklyRecapModal';
@@ -25,45 +28,64 @@ import { useWeeklyRecap } from '@/hooks/useWeeklyRecap';
 import PerfectDayCelebration from '@/components/PerfectDayCelebration';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
-import { getDailyQuote } from '@/constants/quotes';
-import QuoteCard from '@/components/QuoteCard';
 import MedalBadge from '@/components/MedalBadge';
+import { XPFillBar } from '@/components/XPFillBar';
+import { StreakFlame } from '@/components/StreakFlame';
+
+// ─── Médailles de rang (niveau 1 à 10) ─────────────────────────────────────
+const RANK_MEDALS: Record<number, any> = {
+  1:  require('@/assets/medals/medaille_rang_01_novice.png'),
+  2:  require('@/assets/medals/medaille_rang_02_initie.png'),
+  3:  require('@/assets/medals/medaille_rang_03_disciple.png'),
+  4:  require('@/assets/medals/medaille_rang_04_guerrier.png'),
+  5:  require('@/assets/medals/medaille_rang_05_strategie.png'),
+  6:  require('@/assets/medals/medaille_rang_06_conquerant.png'),
+  7:  require('@/assets/medals/medaille_rang_07_champion.png'),
+  8:  require('@/assets/medals/medaille_rang_08_maitre.png'),
+  9:  require('@/assets/medals/medaille_rang_09_elite.png'),
+  10: require('@/assets/medals/medaille_rang_10_aegis.png'),
+};
 import LevelUpModal from '@/components/LevelUpModal';
-import DailyQuests from '@/components/DailyQuests';
-import QuestBanner from '@/components/QuestBanner';
-import { getTodayQuests, type Quest } from '@/constants/quests';
+import { getTodayQuests, adaptQuestsForGender, type Quest } from '@/constants/quests';
 import { useSound } from '@/hooks/useSound';
+import { useGender } from '@/hooks/useGender';
+import { ActionRow } from '@/components/ui';
+import QuestBanner from '@/components/QuestBanner';
+import QuestsScreen from '@/components/QuestsScreen';
+import NotificationSettings from '@/components/NotifSettings';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
+const GOLD  = '#C9A84C';
+const GOLDB = '#E8C46A';
 
-function XPPopup({ xp }: { xp: number }) {
-  const anim = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    Animated.sequence([
-      Animated.timing(anim, { toValue: 1, duration: 300, useNativeDriver: true }),
-      Animated.delay(800),
-      Animated.timing(anim, { toValue: 0, duration: 300, useNativeDriver: true }),
-    ]).start();
-  }, []);
-  return (
-    <Animated.View style={{
-      opacity: anim,
-      transform: [{ translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [10, -20] }) }],
-      marginBottom: 4,
-    }}>
-      <Text style={{ fontFamily: 'SpaceMono', fontSize: 20, fontWeight: '700', color: C.gold }}>+{xp} XP</Text>
-    </Animated.View>
-  );
-}
+// ─── Assets ───────────────────────────────────────────────────────────────────
+const HERO_IMG    = require('@/assets/hero/hero_accueil.png');
+const BG_MISSION  = require('@/assets/hero/bg_mission.png');
+const BG_QUOTE    = require('@/assets/hero/bg_quote_accueil.png');
 
+const STAT_ICONS: Record<string, any> = {
+  calories:    require('@/assets/ui/icone_calories2.png'),
+  entrainement:require('@/assets/ui/icone_seance2.png'),
+  lecture:     require('@/assets/ui/icone_lecture2.png'),
+  eau:         require('@/assets/ui/icone_eau2.png'),
+};
+
+const HABIT_IMAGES: Record<string, any> = {
+  workout_done:  require('@/assets/ui/icone_seance.png'),
+  calories_ok:   require('@/assets/ui/icone_calories.png'),
+  learning_done: require('@/assets/ui/icone_lecture.png'),
+  m_face:        require('@/assets/ui/icone_skincare.png'),
+  outfit_ok:     require('@/assets/ui/icone_style.png'),
+  morning_water: require('@/assets/ui/icone_eau.png'),
+};
+
+import { Modal } from 'react-native';
 function MilestoneModal({ milestone, onClose }: { milestone: any; onClose: () => void }) {
-  const { STREAK_MILESTONES } = require('@/constants/rpg');
   const idx = STREAK_MILESTONES.findIndex((m: any) => m.days === milestone.days);
-
   return (
     <Modal visible transparent animationType="fade">
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.92)', justifyContent: 'center', alignItems: 'center', padding: 32 }}>
-        <View style={{ backgroundColor: C.s1, borderRadius: 24, padding: 32, alignItems: 'center', borderWidth: 1, borderColor: milestone.color + '44', width: '100%' }}>
+        <View style={{ backgroundColor: '#0A0800', borderRadius: 24, padding: 32, alignItems: 'center', borderWidth: 1, borderColor: milestone.color + '44', width: '100%' }}>
           <MedalBadge milestoneIndex={idx >= 0 ? idx : 0} achieved size={100} />
           <Text style={{ fontFamily: 'Cinzel', fontSize: 22, letterSpacing: 3, color: milestone.color, marginBottom: 8, marginTop: 8 }}>{milestone.title}</Text>
           <Text style={{ fontSize: 13, color: C.dim, textAlign: 'center', lineHeight: 20, marginBottom: 24 }}>{milestone.description}</Text>
@@ -76,675 +98,697 @@ function MilestoneModal({ milestone, onClose }: { milestone: any; onClose: () =>
   );
 }
 
+// ─── StatTile ─────────────────────────────────────────────────────────────────
+function StatTile({ icon, value, target, unit, label, color = GOLD, onChange, keyboardType = 'numeric' }: {
+  icon: any; value: number; target: number; unit: string; label: string;
+  color?: string; onChange: (v: number | undefined) => void; keyboardType?: any;
+}) {
+  const pct      = target > 0 ? Math.min(value / target, 1) : 0;
+  const reached  = value >= target && target > 0;
+  const barAnim  = useRef(new Animated.Value(0)).current;
+  const prevPct  = useRef(0);
+  const [text, setText] = useState(value > 0 ? String(value) : '');
 
-// ─── Config habitudes ─────────────────────────────────────────────────────────
-const HABIT_CONFIG: Record<string, { icon: string; color: string; xp: number }> = {
-  workout_done:  { icon: '⚔️', color: C.gold,     xp: 40 },
-  calories_ok:   { icon: '🍎', color: C.gold,     xp: 20 },
-  learning_done: { icon: '📚', color: C.gold,     xp: 25 },
-  m_face:        { icon: '✨', color: C.gold,     xp: 15 },
-  outfit_ok:     { icon: '👕', color: C.gold,     xp: 10 },
-  morning_water: { icon: '💧', color: C.gold,     xp: 10 },
+  useEffect(() => {
+    if (pct !== prevPct.current) {
+      Animated.timing(barAnim, {
+        toValue: pct,
+        duration: 600,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: false,
+      }).start();
+      prevPct.current = pct;
+    }
+  }, [pct]);
+
+  // Sync text si value change depuis l'extérieur
+  useEffect(() => {
+    setText(value > 0 ? String(value) : '');
+  }, [value]);
+
+  const barWidth = barAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] });
+  const barColor = reached ? C.green : color;
+
+  return (
+    <View style={{
+      width: 140, height: 140,
+      backgroundColor: '#0A0800', borderRadius: 20,
+      overflow: 'hidden',
+      borderWidth: 1,
+      borderColor: reached ? color + '66' : 'rgba(255,255,255,0.07)',
+    }}>
+      {/* Icône grande en absolute - ne pousse rien */}
+      <Image
+        source={icon}
+        style={{ position: 'absolute', width: 110, height: 110, top: -10, left: 15, opacity: 0.9 }}
+        resizeMode="contain"
+      />
+      {/* Texte + barre collés en bas, centrés */}
+      <View style={{ position: 'absolute', bottom: 12, left: 0, right: 0, alignItems: 'center' }}>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 3 }}>
+          <TextInput
+            style={{ fontFamily: 'SpaceMono', fontSize: 22, color: reached ? C.green : C.text, fontWeight: '700', padding: 0, textAlign: 'center' }}
+            value={text}
+            onChangeText={t => { setText(t); }}
+            onEndEditing={() => {
+              const n = parseFloat(text.replace(',', '.'));
+              onChange(isNaN(n) ? undefined : n);
+              if (isNaN(n)) setText('');
+            }}
+            placeholder="—"
+            placeholderTextColor="rgba(255,255,255,0.2)"
+            keyboardType={keyboardType}
+            returnKeyType="done"
+          />
+          {unit ? <Text style={{ fontSize: 10, color: C.dim, marginBottom: 2 }}>{unit}</Text> : null}
+        </View>
+        <Text style={{ fontSize: 9, color: C.dim, letterSpacing: 1.5, textTransform: 'uppercase', marginTop: 2, textAlign: 'center' }}>{label}</Text>
+        <View style={{ height: 2, backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: 1, width: '80%', overflow: 'hidden', marginTop: 6 }}>
+          <Animated.View style={{ height: '100%', borderRadius: 1, width: barWidth, backgroundColor: barColor }} />
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// ─── HabitOrb ─────────────────────────────────────────────────────────────────
+const ORB_SIZE = 72;
+
+const HABIT_IMG_OFFSETS: Record<string, object> = {
+  calories_ok:   { marginTop: 6 },
+  m_face:        { marginTop: 6 },
+  learning_done: { marginRight: 6 },
 };
-
-// ─── HabitOrb — cercle collectible, grille 3×2 ───────────────────────────────
-// Règle driver : scale + opacity = native | bg/border = JS
-const { width: SCREEN_W } = require('react-native').Dimensions.get('window');
-const ORB_SIZE = Math.floor((SCREEN_W - 48 - 4 * 10) / 3);  // 3 colonnes
 
 function HabitOrb({ habitKey, label, active, onPress }: {
   habitKey: string; label: string; active: boolean; onPress: () => void;
 }) {
-  const cfg         = HABIT_CONFIG[habitKey] ?? { icon: '✦', color: C.gold, xp: 10 };
-  const scale       = useRef(new Animated.Value(1)).current;      // native
-  const glowOpacity = useRef(new Animated.Value(active ? 1 : 0)).current; // native
-  const ringColor   = useRef(new Animated.Value(active ? 1 : 0)).current; // JS
-  const checkScale  = useRef(new Animated.Value(active ? 1 : 0)).current; // native
+  const scale      = useRef(new Animated.Value(1)).current;
+  const glowAnim   = useRef(new Animated.Value(active ? 1 : 0)).current;
+  const checkScale = useRef(new Animated.Value(active ? 1 : 0)).current;
+  const [burst, setBurst] = useState(false);
 
   useEffect(() => {
-    Animated.timing(ringColor,   { toValue: active ? 1 : 0, duration: 250, useNativeDriver: false }).start();
-    Animated.spring(glowOpacity, { toValue: active ? 1 : 0, tension: 120, friction: 10, useNativeDriver: true }).start();
-    Animated.spring(checkScale,  { toValue: active ? 1 : 0, tension: 200, friction: 8,  useNativeDriver: true }).start();
+    Animated.timing(glowAnim,   { toValue: active ? 1 : 0, duration: 250, useNativeDriver: false }).start();
+    Animated.spring(checkScale, { toValue: active ? 1 : 0, tension: 200, friction: 8, useNativeDriver: true }).start();
   }, [active]);
 
   function handlePress() {
     Animated.sequence([
-      Animated.spring(scale, { toValue: 0.82, tension: 500, friction: 8,  useNativeDriver: true }),
-      Animated.spring(scale, { toValue: 1.08, tension: 200, friction: 7,  useNativeDriver: true }),
+      Animated.spring(scale, { toValue: 0.82, tension: 500, friction: 8, useNativeDriver: true }),
+      Animated.spring(scale, { toValue: 1.08, tension: 200, friction: 7, useNativeDriver: true }),
       Animated.spring(scale, { toValue: 1,    tension: 180, friction: 10, useNativeDriver: true }),
     ]).start();
+    if (!active) { setBurst(true); setTimeout(() => setBurst(false), 600); }
     onPress();
   }
 
-  const borderCol = ringColor.interpolate({
-    inputRange: [0, 1], outputRange: [C.s3, cfg.color],
-  });
-  const bgCol = ringColor.interpolate({
-    inputRange: [0, 1], outputRange: ['transparent', cfg.color + '18'],
-  });
+  const borderCol = glowAnim.interpolate({ inputRange: [0, 1], outputRange: ['#2a2520', GOLD] });
+  const bgCol     = glowAnim.interpolate({ inputRange: [0, 1], outputRange: ['rgba(0,0,0,0)', GOLD + '18'] });
 
   return (
-    <TouchableOpacity onPress={handlePress} activeOpacity={1}
-      style={{ width: ORB_SIZE, alignItems: 'center', paddingVertical: 4 }}>
+    <TouchableOpacity onPress={handlePress} activeOpacity={1} style={{ alignItems: 'center', width: ORB_SIZE + 20 }}>
       <Animated.View style={{ transform: [{ scale }] }}>
-        {/* Glow halo — native driver */}
         <Animated.View style={{
-          position: 'absolute',
-          width: ORB_SIZE - 4, height: ORB_SIZE - 4,
-          borderRadius: (ORB_SIZE - 4) / 2,
-          backgroundColor: cfg.color,
-          opacity: glowOpacity.interpolate({ inputRange: [0, 1], outputRange: [0, 0.22] }),
-          transform: [{ scale: 1.2 }],
-          top: 2, left: 2,
-        }} />
-
-        {/* Cercle principal — JS driver (couleurs) */}
-        <Animated.View style={{
-          width: ORB_SIZE - 4, height: ORB_SIZE - 4,
-          borderRadius: (ORB_SIZE - 4) / 2,
+          width: ORB_SIZE, height: ORB_SIZE,
+          borderRadius: ORB_SIZE / 2,
           borderWidth: active ? 2 : 1.5,
           borderColor: borderCol,
           backgroundColor: bgCol,
           alignItems: 'center', justifyContent: 'center',
         }}>
-          <Text style={{ fontSize: ORB_SIZE * 0.34 }}>{cfg.icon}</Text>
-
-          {/* Checkmark — native driver */}
-          <Animated.View style={{
-            position: 'absolute', bottom: 4, right: 4,
-            width: 18, height: 18, borderRadius: 9,
-            backgroundColor: cfg.color,
-            alignItems: 'center', justifyContent: 'center',
-            opacity: checkScale,
-            transform: [{ scale: checkScale.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 1.3, 1] }) }],
-          }}>
-            <Text style={{ color: '#000', fontSize: 10, fontWeight: '800' }}>✓</Text>
-          </Animated.View>
+          {HABIT_IMAGES[habitKey] && (
+            <Image
+              source={HABIT_IMAGES[habitKey]}
+              style={{ width: ORB_SIZE * 0.75, height: ORB_SIZE * 0.75, opacity: active ? 1 : 0.35, alignSelf: 'center', ...HABIT_IMG_OFFSETS[habitKey] }}
+              resizeMode="contain"
+            />
+          )}
+          {active && (
+            <Animated.View style={{
+              position: 'absolute', bottom: -2, right: -2,
+              width: 16, height: 16, borderRadius: 8,
+              backgroundColor: GOLD, alignItems: 'center', justifyContent: 'center',
+              opacity: checkScale,
+              transform: [{ scale: checkScale }],
+            }}>
+              <Text style={{ color: '#000', fontSize: 9, fontWeight: '800' }}>✓</Text>
+            </Animated.View>
+          )}
         </Animated.View>
       </Animated.View>
-
-      {/* Label sous le cercle */}
       <Text style={{
-        fontSize: 9, marginTop: 6, textAlign: 'center', lineHeight: 12,
-        color: active ? cfg.color : C.dim,
-        fontWeight: active ? '600' : '400',
-        letterSpacing: 0.3,
+        fontSize: 8, marginTop: 6, textAlign: 'center', color: active ? GOLD : C.dim,
+        letterSpacing: 0.5, fontWeight: active ? '700' : '400',
       }} numberOfLines={2}>
-        {label.split(' ').slice(0, 2).join('\n')}
+        {label.split(' ')[0].toUpperCase()}
+      </Text>
+      <Text style={{ fontSize: 7, color: active ? C.green : C.dim, textAlign: 'center' }}>
+        {active ? '1/1' : '0/1'}
       </Text>
     </TouchableOpacity>
   );
 }
 
-
-// ─── ScoreCard — Bronze → Or Blanc progressif ─────────────────────────────────
-// doneAnim : JS driver (interpolation couleurs bg/border/text)
-// glowAnim : native driver (opacity uniquement — glow pulsant jour parfait)
-const PERF_BORDER = ['#6B4F10','#8B6519','#A07524','#B98E2E','#CDA83A','#DFC050','#F5E890'];
-const PERF_BG     = ['#080500','#0A0700','#0C0900','#0F0B00','#120E00','#161200','#1C1600'];
-
-function ScoreCard({ done, score, scoreLabel }: { done: number; score: number; scoreLabel: string }) {
-  const doneAnim = useRef(new Animated.Value(done)).current; // JS — couleurs
-  const glowAnim = useRef(new Animated.Value(0)).current;   // native — opacity
-
-  // Transition fluide entre états de couleur
-  useEffect(() => {
-    Animated.spring(doneAnim, {
-      toValue: done,
-      tension: 50, friction: 14,
-      useNativeDriver: false,
-    }).start();
-  }, [done]);
-
-  // Glow pulsant uniquement quand jour parfait
-  useEffect(() => {
-    if (done === 6) {
-      const loop = Animated.loop(
-        Animated.sequence([
-          Animated.timing(glowAnim, { toValue: 1,   duration: 1400, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-          Animated.timing(glowAnim, { toValue: 0.2, duration: 1400, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-        ])
-      );
-      loop.start();
-      return () => loop.stop();
-    } else {
-      Animated.timing(glowAnim, { toValue: 0, duration: 400, useNativeDriver: true }).start();
-    }
-  }, [done]);
-
-  const IR = [0,1,2,3,4,5,6];
-  const borderColor = doneAnim.interpolate({ inputRange: IR, outputRange: PERF_BORDER, extrapolate: 'clamp' });
-  const bgColor     = doneAnim.interpolate({ inputRange: IR, outputRange: PERF_BG,     extrapolate: 'clamp' });
-  const textColor   = doneAnim.interpolate({ inputRange: IR, outputRange: PERF_BORDER, extrapolate: 'clamp' });
-
-  return (
-    <View style={{ flex: 1.15, borderRadius: 16, overflow: 'hidden' }}>
-
-      {/* Glow overlay — native driver uniquement (opacity) */}
-      <Animated.View style={{
-        ...StyleSheet.absoluteFillObject,
-        backgroundColor: '#F5E890',
-        opacity: glowAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 0.10] }),
-        borderRadius: 16,
-      }} />
-
-      {/* Carte principale — JS driver (bg + border en couleurs interpolées) */}
-      <Animated.View style={{
-        flex: 1,
-        backgroundColor: bgColor,
-        borderWidth: done >= 5 ? 1.5 : 1,
-        borderColor: borderColor,
-        borderRadius: 16,
-        padding: 16,
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 8,
-        shadowColor: '#F5E090',
-        shadowOffset: { width: 0, height: 0 },
-        shadowOpacity: done >= 4 ? 0.25 + done * 0.08 : 0,
-        shadowRadius: done >= 4 ? done * 3 : 0,
-        elevation: done >= 4 ? done : 0,
-      }}>
-        <ScoreRing score={score} />
-
-        <Animated.Text style={{
-          fontFamily: 'Cinzel', fontSize: 9,
-          letterSpacing: 2, textAlign: 'center',
-          color: textColor,
-        }}>
-          {scoreLabel}
-        </Animated.Text>
-
-        {/* Badge PARFAIT — visible seulement quand done=6, pulse via glowAnim */}
-        {done === 6 && (
-          <Animated.View style={{
-            borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3,
-            borderWidth: 1, borderColor: '#F5E890',
-            backgroundColor: '#F5E89011',
-            opacity: glowAnim.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1] }),
-          }}>
-            <Text style={{ fontSize: 8, color: '#F5E890', fontWeight: '700', letterSpacing: 1 }}>
-              PARFAIT ✦
-            </Text>
-          </Animated.View>
-        )}
-      </Animated.View>
-    </View>
-  );
-}
-
-const missionStyles = StyleSheet.create({
-  card: {
-    backgroundColor: '#0A0800',
-    borderWidth: 1,
-    borderColor: C.goldDim,
-    borderRadius: 16,
-    padding: 18,
-    marginBottom: 14,
-    shadowColor: C.gold,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  input: {
-    color: C.text,
-    fontSize: 15,
-    lineHeight: 22,
-    minHeight: 56,
-    textAlignVertical: 'top',
-    fontStyle: 'italic',
-  },
-});
-
+// ─── Main Dashboard ───────────────────────────────────────────────────────────
 export default function DashboardScreen() {
   const { user } = useAuth();
+  const [profile, setProfile] = useState<any>(null);
+  const gender = useGender(user?.id);
+
+  useFocusEffect(useCallback(() => {
+    if (!user?.id) return;
+    supabase.from('profiles').select('name, xp_penalty').eq('id', user.id).single()
+      .then(({ data }) => { if (data) setProfile(data); });
+  }, [user?.id]));
+
   const { play, stop } = useSound();
-  const { day, history, streak, updateDay } = useDay(user?.id);
+  const { shieldDates, syncShields } = useStreakShields(user?.id);
+  const { pausedDates } = usePause(user?.id);
+  const { playAmbient } = useAmbientSound();
+
+  useFocusEffect(useCallback(() => {
+    playAmbient('accueil');
+  }, []));
+  const { day, history, streak, updateDay } = useDay(user?.id, [...shieldDates, ...pausedDates]);
+  const { status: inactivity } = useInactivity(user?.id, profile?.name ?? '', gender);
+
+  useEffect(() => {
+    if (day && history) syncShields(day, history);
+  }, [day?.date, history.length]);
   const insets = useSafeAreaInsets();
-  const HERO_H = 280 + insets.top;
 
-
-  const [heroUri, setHeroUri] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [xpPopups, setXpPopups] = useState<number[]>([]);
-  const [milestoneToShow, setMilestoneToShow] = useState<any>(null);
-  const [showPerfectDay, setShowPerfectDay] = useState(false);
-  const [showEveningSummary, setShowEveningSummary] = useState(false);
-  const [levelUpRank, setLevelUpRank] = useState<any>(null);
-  const prevRankLevel = useRef<number | null>(null);
-  const [completedQuests, setCompletedQuests] = useState<Set<string>>(new Set());
-  const [questBanner, setQuestBanner] = useState<Quest | null>(null);
-  const todayQuests = getTodayQuests();
+  const [xpPopups, setXpPopups]         = useState<{id: number; xp: number}[]>([]);
+  const [milestoneToShow, setMilestone]  = useState<any>(null);
+  const [showPerfectDay, setShowPerfect] = useState(false);
+  const [showEveningSummary, setEvening] = useState(false);
+  const [levelUpRank, setLevelUpRank]    = useState<any>(null);
+  const [completedQuests, setCompletedQ] = useState<Set<string>>(new Set());
+  const [questBanner, setQuestBanner]    = useState<Quest | null>(null);
+  const [showQuests, setShowQuests]      = useState(false);
+  const [showNotif,  setShowNotif]       = useState(false);
   const { evening } = useLocalSearchParams<{ evening?: string }>();
-  const prevStreak = useRef(streak);
-  const doneScale  = useRef(new Animated.Value(1)).current;
-  const prevDone   = useRef(0);
+  const prevDone    = useRef(0);
+  const prevStreak  = useRef(streak);
+  const prevRankLvl = useRef<number | null>(null);
+  const doneScale   = useRef(new Animated.Value(1)).current;
+  const xpGainAnim  = useRef(new Animated.Value(0)).current;
+  const heroScale   = useRef(new Animated.Value(1)).current;
 
+  // Hero breathing
+  useEffect(() => {
+    const loop = Animated.loop(Animated.sequence([
+      Animated.timing(heroScale, { toValue: 1.03, duration: 4000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      Animated.timing(heroScale, { toValue: 1,    duration: 4000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+    ]));
+    loop.start();
+    return () => loop.stop();
+  }, []);
+
+  // Stagger entrance
+  const stagger = useRef([0,1,2,3,4,5].map(() => new Animated.Value(0))).current;
+  useEffect(() => {
+    setTimeout(() => {
+      Animated.stagger(80, stagger.map(a =>
+        Animated.spring(a, { toValue: 1, tension: 50, friction: 12, useNativeDriver: true })
+      )).start();
+    }, 200);
+  }, []);
+  const S = (i: number) => ({
+    opacity: stagger[i],
+    transform: [{ translateY: stagger[i].interpolate({ inputRange: [0,1], outputRange: [24, 0] }) }],
+  });
+
+  const xpPenalty  = (profile as any)?.xp_penalty ?? 0;
+  const calTarget  = (profile as any)?.cal_target  ?? 2300;
+  const protTarget = (profile as any)?.prot_target ?? 180;
+  const totalXP   = Math.max(0, calcTotalXP([...history.filter(h => h.date !== day.date), day]) - xpPenalty);
+  const rank      = getRank(totalXP) ?? { level: 1, name: 'NOVICE', color: GOLD, minXP: 0 };
+  const RANK_TIERS = RANKS.filter((r, i) => i === 0 || r.name !== RANKS[i - 1].name);
+  const rankTierIndex = (RANK_TIERS.findIndex(r => r.name === rank.name) + 1) || 1; // 1-10
+  const score     = calcScore(day);
+  const done      = HABIT_KEYS.filter(k => !!day[k as keyof typeof day]).length;
+  const isFemale  = gender === 'female';
+  const userName  = profile?.name ?? (isFemale ? 'Guerrière' : 'Guerrier');
+  const todayQuests = adaptQuestsForGender(getTodayQuests(inactivity.isReturning), gender);
+  const nextMilestone = getNextMilestone(streak);
+  const currentMilestone = getCurrentMilestone(streak);
   const { showRecap, recapData, closeRecap } = useWeeklyRecap(user?.id);
 
-  // Déclenche EveningSummary si ouvert depuis tap notif soir
+  // Done animation
   useEffect(() => {
-    if (evening === '1') setShowEveningSummary(true);
-  }, [evening]);
+    if (done > prevDone.current) {
+      doneScale.setValue(0.85);
+      Animated.spring(doneScale, { toValue: 1, tension: 120, friction: 10, useNativeDriver: true }).start();
+      if (done === 6) {
+        const key = `@aegis:perfect_day_${new Date().toISOString().split('T')[0]}`;
+        AsyncStorage.getItem(key).then(shown => {
+          if (!shown) {
+            setShowPerfect(true);
+            play('perfectday');
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            AsyncStorage.setItem(key, 'true');
+            setTimeout(() => setShowPerfect(false), 3500);
+          }
+        });
+      }
+    }
+    prevDone.current = done;
+  }, [done]);
 
-  // Détection complétion des quêtes
+  // Streak milestone
+  useEffect(() => {
+    if (streak > prevStreak.current && currentMilestone) {
+      const newM = STREAK_MILESTONES.find((m: any) => m.days === streak);
+      if (newM) { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); setMilestone(newM); play('badge'); }
+    }
+    prevStreak.current = streak;
+  }, [streak]);
+
+  // Rank up
+  useEffect(() => {
+    if (totalXP === 0) return;
+    AsyncStorage.getItem('@aegis:last_rank_level').then(stored => {
+      const prev = stored ? parseInt(stored) : null;
+      if (prev === null) { AsyncStorage.setItem('@aegis:last_rank_level', String(rank.level)); prevRankLvl.current = rank.level; return; }
+      if (rank.level > prev && prev > 0) { setLevelUpRank(rank); Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); }
+      AsyncStorage.setItem('@aegis:last_rank_level', String(rank.level));
+      prevRankLvl.current = rank.level;
+    });
+  }, [rank.level]);
+
+  // Quest detection
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0];
     todayQuests.forEach(async quest => {
       if (completedQuests.has(quest.id)) return;
       if (!quest.check(day)) return;
-
       const key = `@aegis:quest_${quest.id}_${today}`;
       const already = await AsyncStorage.getItem(key);
-      if (already) {
-        setCompletedQuests(prev => new Set([...prev, quest.id]));
-        return;
-      }
-
-      // Nouvelle complétion
+      if (already) { setCompletedQ(prev => new Set([...prev, quest.id])); return; }
       await AsyncStorage.setItem(key, 'true');
-      setCompletedQuests(prev => new Set([...prev, quest.id]));
-      setQuestBanner(quest);
+      setCompletedQ(prev => new Set([...prev, quest.id]));
+      const isPerfect = done >= 6;
+      setTimeout(() => setQuestBanner(quest), isPerfect ? 3000 : 0);
       play('badge');
     });
   }, [day]);
 
-  // Détection level up — persiste le rang dans AsyncStorage pour détecter entre sessions
   useEffect(() => {
-    if (totalXP === 0) return;
-    const key = '@aegis:last_rank_level';
-    AsyncStorage.getItem(key).then(stored => {
-      const prev = stored ? parseInt(stored) : null;
-      if (prev === null) {
-        // Premier lancement — on stocke sans déclencher
-        AsyncStorage.setItem(key, String(rank.level));
-        prevRankLevel.current = rank.level;
-        return;
-      }
-      if (rank.level > prev) {
-        // Level up détecté !
-        setLevelUpRank(rank);
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy), 500);
-        AsyncStorage.setItem(key, String(rank.level));
-      }
-      prevRankLevel.current = rank.level;
-    });
-  }, [totalXP]);
+    if (evening === '1') setEvening(true);
+  }, [evening]);
 
-  const totalXP = calcTotalXP([...history.filter(h => h.date !== day.date), day]);
-  const rank = getRank(totalXP);
-  const score = calcScore(day);
-  const done = HABIT_KEYS.filter(k => !!day[k as keyof typeof day]).length;
-  const quote = getDailyQuote();
-  const dateStr = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' }).toUpperCase();
-  const currentMilestone = getCurrentMilestone(streak);
-  const nextMilestone = getNextMilestone(streak);
-  const scoreLabel = done === 6 ? 'JOUR PARFAIT' : score >= 70 ? 'DISCIPLINÉ' : score >= 40 ? 'EN MARCHE' : 'À DÉMARRER';
-  
-
-  // ── Thème dynamique ──────────────────────────────────────────────────────
-  // Niveau 0 = < 40% | Niveau 1 = 40-69% | Niveau 2 = 70-89% | Niveau 3 = 90-100%
-  const disciplineLevel = score >= 90 ? 3 : score >= 70 ? 2 : score >= 40 ? 1 : 0;
-
-  const dynTheme = {
-    // Fond hero quand pas de photo — légèrement plus chaud selon niveau
-    heroBg: ['#070707', '#0A0800', '#0D0A00', '#110C00'][disciplineLevel],
-    // Bordure de la XP bar
-    xpBorder: [
-      rank.color + '22',
-      rank.color + '44',
-      rank.color + '66',
-      rank.color + '99',
-    ][disciplineLevel],
-    // Fond de la XP bar
-    xpBg: [
-      rank.color + '04',
-      rank.color + '08',
-      rank.color + '0D',
-      rank.color + '14',
-    ][disciplineLevel],
-    // Intensité du glow sur la bordure gauche de la citation
-    quoteAccent: ['#5A4520', '#7A5A28', '#9A7232', '#C9A84C'][disciplineLevel],
-    // Opacité du gradient hero
-    heroGradient: [
-      ['rgba(7,7,7,0.05)', 'rgba(7,7,7,0.55)', 'rgba(7,7,7,1)'],
-      ['rgba(12,9,0,0.05)', 'rgba(10,8,0,0.55)', 'rgba(7,7,7,1)'],
-      ['rgba(18,13,0,0.05)', 'rgba(14,11,0,0.55)', 'rgba(7,7,7,1)'],
-      ['rgba(24,18,0,0.05)', 'rgba(18,14,0,0.55)', 'rgba(7,7,7,1)'],
-    ][disciplineLevel] as [string, string, string],
-  };
-
-  useEffect(() => {
-    if (!user) return;
-    const { data } = supabase.storage.from('avatar').getPublicUrl(`hero_${user.id}.jpg`);
-    if (data?.publicUrl) setHeroUri(data.publicUrl);
-
-    // Charge les quêtes déjà complétées aujourd'hui
-    const today = new Date().toISOString().split('T')[0];
-    const loadCompleted = async () => {
-      const done = new Set<string>();
-      for (const q of getTodayQuests()) {
-        const val = await AsyncStorage.getItem(`@aegis:quest_${q.id}_${today}`);
-        if (val) done.add(q.id);
-      }
-      setCompletedQuests(done);
-    };
-    loadCompleted();
-  }, [user]);
-
-  // Résumé du soir automatique — après 20h au premier lancement
   useEffect(() => {
     const hour = new Date().getHours();
     if (hour < 20) return;
-    const todayKey = `@aegis:evening_summary_${new Date().toISOString().split('T')[0]}`;
-    AsyncStorage.getItem(todayKey).then(shown => {
-      if (!shown) {
-        setShowEveningSummary(true);
-        AsyncStorage.setItem(todayKey, 'true');
-      }
+    const key = `@aegis:evening_summary_${new Date().toISOString().split('T')[0]}`;
+    AsyncStorage.getItem(key).then(shown => {
+      if (!shown) { setEvening(true); AsyncStorage.setItem(key, 'true'); }
     });
   }, []);
- 
+
   useEffect(() => {
-  if (streak > prevStreak.current && currentMilestone) {
-    const { STREAK_MILESTONES } = require('@/constants/rpg');
-    const newMilestone = STREAK_MILESTONES.find((m: any) => m.days === streak);
-    if (newMilestone) {
-      // ✅ Milestone streak → notification forte
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setMilestoneToShow(newMilestone);
-      play('badge'); // ← ajoute
-    }
-  }
-  prevStreak.current = streak;
-}, [streak]);
-
-
-useEffect(() => {
-  if (done > prevDone.current) {
-    doneScale.setValue(0.85);
-    Animated.spring(doneScale, {
-      toValue: 1,
-      tension: 120,
-      friction: 10,
-      useNativeDriver: true,
-    }).start();
-
-    // Détection Perfect Day — montré une seule fois par jour
-    if (done === 6) {
-      const todayKey = `@aegis:perfect_day_${new Date().toISOString().split('T')[0]}`;
-      AsyncStorage.getItem(todayKey).then(shown => {
-        if (!shown) {
-          setShowPerfectDay(true);
-          play('perfectday'); // ← ajoute
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-          setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy), 200);
-          AsyncStorage.setItem(todayKey, 'true');
-          // Reset après 3.5s
-          setTimeout(() => setShowPerfectDay(false), 3500);
-        }
-      });
-    }
-  }
-  prevDone.current = done;
-}, [done]);
-
-  async function pickHero() {
-    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, quality: 0.7 });
-    if (result.canceled || !user) return;
-    const uri = result.assets[0].uri;
-    setHeroUri(uri);
-    setUploading(true);
-    try {
-      const response = await fetch(uri);
-      const blob = await response.blob();
-      const arr = await new Response(blob).arrayBuffer();
-      const { error } = await supabase.storage.from('avatar').upload(`hero_${user.id}.jpg`, new Uint8Array(arr), { contentType: 'image/jpeg', upsert: true });
-      if (!error) {
-        const { data } = supabase.storage.from('avatar').getPublicUrl(`hero_${user.id}.jpg`);
-        setHeroUri(data.publicUrl + '?t=' + Date.now());
+    const today = new Date().toISOString().split('T')[0];
+    const load = async () => {
+      const done = new Set<string>();
+      for (const q of getTodayQuests(inactivity.isReturning)) {
+        const val = await AsyncStorage.getItem(`@aegis:quest_${q.id}_${today}`);
+        if (val) done.add(q.id);
       }
-    } catch {}
-    setUploading(false);
-  }
+      setCompletedQ(done);
+    };
+    load();
+  }, [user, inactivity.isReturning]);
 
   function showXP(xp: number) {
     const id = Date.now();
-    setXpPopups(p => [...p, id]);
-    setTimeout(() => setXpPopups(p => p.filter(x => x !== id)), 1500);
+    setXpPopups(p => [...p, { id, xp }]);
+    setTimeout(() => setXpPopups(p => p.filter(x => x.id !== id)), 1500);
+    xpGainAnim.setValue(1);
+    Animated.timing(xpGainAnim, { toValue: 0, duration: 1400, easing: Easing.out(Easing.cubic), useNativeDriver: false }).start();
   }
 
- async function toggleHabit(key: string) {
-  const current = !!(day as any)[key];
-  const updates: any = { [key]: !current };
-
-  if (key === 'm_face') {
-    updates.m_face = !current; updates.m_hydra = !current; updates.m_skin = !current;
-    updates.e_face = !current; updates.e_hydra = !current; updates.e_skin = !current;
+  async function toggleHabit(key: string) {
+    const current = !!(day as any)[key];
+    const updates: any = { [key]: !current };
+    if (key === 'm_face') {
+      updates.m_face = !current; updates.m_hydra = !current; updates.m_skin = !current;
+      updates.e_face = !current; updates.e_hydra = !current; updates.e_skin = !current;
+    }
+    await updateDay(updates);
+    if (!current) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      play('habit');
+      const xpMap: any = { workout_done: 40, calories_ok: 20, learning_done: 25, m_face: 15, outfit_ok: 10, morning_water: 10 };
+      if (xpMap[key]) showXP(xpMap[key]);
+    } else {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
   }
 
-  await updateDay(updates);
-
-  if (!current) {
-    // ✅ Habitude validée → impact moyen satisfaisant
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      play('habit'); // ← ajoute
-
-    const xpMap: any = { workout_done: 40, calories_ok: 20, learning_done: 25, m_face: 15, outfit_ok: 10, morning_water: 10 };
-    if (xpMap[key]) showXP(xpMap[key]);
-  } else {
-    // ✅ Habitude décochée → léger
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  // XP popup
+  if (xpPopups.length > 0) {
+    // rendered in absolute overlay below
   }
-}
 
   return (
-    <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <View style={{ position: 'absolute', top: 100, right: 20, zIndex: 999, alignItems: 'flex-end' }}>
-        {xpPopups.map(id => <XPPopup key={id} xp={40} />)}
+    <View style={{ flex: 1, backgroundColor: '#0A0800' }}>
+
+      {/* XP Popups */}
+      <View style={{ position: 'absolute', top: 120, right: 20, zIndex: 999, alignItems: 'flex-end' }}>
+        {xpPopups.map(({ id, xp }) => (
+          <XPPopup key={id} xp={xp} />
+        ))}
       </View>
 
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* HERO */}
-        <View style={{ height: HERO_H }}>
-          {heroUri
-            ? <Image source={{ uri: heroUri }} style={{ width, height: HERO_H, resizeMode: 'cover' }} />
-            : <View style={{ width, height: HERO_H, backgroundColor: dynTheme.heroBg, justifyContent: 'center', alignItems: 'center' }}>
-                <Text style={{ fontSize: 60, color: C.goldDim }}>✦</Text>
+      <ScrollView showsVerticalScrollIndicator={false} bounces contentContainerStyle={{ paddingBottom: 16 }}>
+
+        {/* ── HERO ── */}
+        <View style={{ height: height * 0.55, position: 'relative' }}>
+          <Animated.Image
+            source={HERO_IMG}
+            style={{ width: '100%', height: '100%', transform: [{ scale: heroScale }] }}
+            resizeMode="cover"
+          />
+          {/* Gradient overlay */}
+          <LinearGradient
+            colors={['transparent', 'rgba(7,6,10,0.3)', 'rgba(7,6,10,0.85)', '#07060A']}
+            locations={[0.2, 0.5, 0.75, 1]}
+            style={StyleSheet.absoluteFillObject}
+          />
+
+          {/* Top — salut + icons */}
+          <View style={{
+            position: 'absolute', top: insets.top + 12,
+            left: 20, right: 20,
+            flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+          }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={{ color: GOLD, fontSize: 10 }}>✦</Text>
+              <Text style={{ fontSize: 10, color: GOLD, letterSpacing: 2, textTransform: 'uppercase', fontWeight: '700' }}>
+                SALUT, {userName.toUpperCase()}
+              </Text>
+              <Text style={{ color: GOLD, fontSize: 10 }}>✦</Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 10, alignItems: 'center' }}>
+              <TouchableOpacity onPress={() => setShowNotif(true)} style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(0,0,0,0.5)', borderWidth: 1, borderColor: GOLD + '44', alignItems: 'center', justifyContent: 'center' }}>
+                <Image source={require('@/assets/ui/icone_notif.png')} style={{ width: 60, height: 60 }} resizeMode="contain" />
+              </TouchableOpacity>
+              <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(0,0,0,0.5)', borderWidth: 1, borderColor: GOLD + '44', alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ fontFamily: 'Cinzel', fontSize: 12, color: GOLD }}>A</Text>
               </View>
-          }
-          <LinearGradient colors={['rgba(7,7,7,0.05)', 'rgba(7,7,7,0.5)', 'rgba(7,7,7,1)']} style={StyleSheet.absoluteFillObject} />
-          <View style={{ position: 'absolute', top: insets.top + 12, left: 16 }}>
-            <RankBadge totalXP={totalXP} />
+            </View>
           </View>
-          <TouchableOpacity onPress={pickHero} style={{ position: 'absolute', bottom: 18, right: 16, backgroundColor: 'rgba(0,0,0,0.6)', borderRadius: 10, padding: 10, borderWidth: 1, borderColor: C.goldDim }} disabled={uploading}>
-            {uploading ? <ActivityIndicator color={C.gold} size="small" /> : <Text>📷</Text>}
-          </TouchableOpacity>
-          <View style={{ position: 'absolute', bottom: 20, left: 20, right: 56 }}>
-            <Text style={{ fontFamily: 'Cinzel', fontSize: 28, color: C.goldBright, letterSpacing: 6 }}>AEGIS</Text>
-            <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', marginTop: 5, letterSpacing: 2 }}>{dateStr}</Text>
+
+          {/* Bottom — tagline */}
+          <View style={{ position: 'absolute', bottom: 32, left: 20, right: 20 }}>
+            <Text style={{ fontSize: 34, color: C.text, fontWeight: '800', lineHeight: 40, marginBottom: 8 }}>
+              Deviens ta{'\n'}
+              <Text style={{ color: GOLDB }}>meilleure</Text> version.
+            </Text>
+            <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.45)', lineHeight: 20 }}>
+              Discipline aujourd'hui,{'\n'}liberté demain.
+            </Text>
           </View>
         </View>
 
-        <View style={{ padding: 16 }}>
-          {/* QUOTE */}
-          <QuoteCard quote={quote} accentColor={dynTheme.quoteAccent} />
+        <View style={{ paddingHorizontal: 16 }}>
 
-          {/* XP BAR */}
-          <Card style={{ borderColor: dynTheme.xpBorder, backgroundColor: dynTheme.xpBg }}>
-            <XPBar totalXP={totalXP} />
-          </Card>
+          {/* ── XP / NIVEAU / STREAK ── */}
+          <Animated.View style={[S(0), {
+            backgroundColor: '#050300',
+            borderRadius: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
+            padding: 18, marginBottom: 14,
+          }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
 
-          {/* SCORE ROW — 3 cartes visuelles */}
-          <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
+              {/* Badge niveau */}
+              {/* Badge niveau - médaille */}
+              <View style={{ alignItems: 'center', width: 56 }}>
+                <Image source={RANK_MEDALS[rankTierIndex] ?? RANK_MEDALS[1]} style={{ width: 56, height: 56 }} resizeMode="contain" />
+                <Text style={{ fontFamily: 'Cinzel', fontSize: 11, color: GOLD, fontWeight: '700', marginTop: 3 }}>NIV. {rank.level}</Text>
+              </View>
 
-            <ScoreCard done={done} score={score} scoreLabel={scoreLabel} />
+              {/* Rang + XP */}
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 9, color: C.dim, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 2 }}>NIVEAU</Text>
+                <Text style={{ fontFamily: 'Cinzel', fontSize: 16, color: GOLDB, letterSpacing: 2 }}>{rank.name}</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                  <XPFillBar
+                    totalXP={totalXP}
+                    level={rank.level}
+                    progress={getXPProgress(totalXP)}
+                    color={GOLD}
+                    height={8}
+                    style={{ flex: 1 }}
+                  />
+                </View>
+              </View>
 
-            {/* ── Colonne droite ── */}
-            <View style={{ flex: 1, gap: 10 }}>
+              {/* XP du jour */}
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text style={{ fontSize: 9, color: C.dim, letterSpacing: 2, textTransform: 'uppercase' }}>XP DU JOUR</Text>
+                <Text style={{ fontFamily: 'SpaceMono', fontSize: 20, color: C.text, marginTop: 2 }}>{calcDayXP(day)}</Text>
+                <Text style={{ fontSize: 9, color: C.dim }}>/ 2500</Text>
+              </View>
+
+              {/* Séparateur */}
+              <View style={{ width: 1, height: 40, backgroundColor: 'rgba(255,255,255,0.08)' }} />
 
               {/* Streak */}
-              <View style={{
-                flex: 1,
-                backgroundColor: streak >= 3 ? '#120A00' : C.s1,
-                borderWidth: 1,
-                borderColor: streak >= 7 ? C.gold + '88' : streak >= 3 ? C.gold + '44' : C.s3,
-                borderRadius: 16, padding: 14,
-              }}>
-                <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 4 }}>
-                  {streak >= 3 && <Text style={{ fontSize: 14 }}>🔥</Text>}
-                  <Text style={{ fontFamily: 'SpaceMono', fontSize: 24, lineHeight: 26, color: streak > 0 ? C.gold : C.dim }}>
-                    {streak}
-                  </Text>
-                  <Text style={{ fontSize: 12, color: C.dim }}>j</Text>
-                </View>
-                <Text style={{ fontSize: 9, color: C.dim, marginTop: 2, letterSpacing: 2, textTransform: 'uppercase' }}>Streak</Text>
-                {nextMilestone && streak > 0 && (
-                  <>
-                    <View style={{ height: 2, backgroundColor: C.s3, borderRadius: 1, marginTop: 8, overflow: 'hidden' }}>
-                      <View style={{
-                        height: 2, borderRadius: 1, backgroundColor: C.gold,
-                        width: `${Math.min(Math.round((streak / nextMilestone.days) * 100), 100)}%` as any,
-                      }} />
-                    </View>
-                    <Text style={{ fontSize: 8, color: C.dim, marginTop: 3 }}>
-                      {nextMilestone.days - streak}j → {nextMilestone.title}
-                    </Text>
-                  </>
-                )}
-              </View>
-
-              {/* Habitudes */}
-              <View style={{
-                flex: 1,
-                backgroundColor: done === 6 ? '#001A0A' : done >= 3 ? '#110C00' : C.s1,
-                borderWidth: 1,
-                borderColor: done === 6 ? C.green + '66' : done >= 3 ? C.gold + '33' : C.s3,
-                borderRadius: 16, padding: 14,
-              }}>
-                <Animated.View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 2, transform: [{ scale: doneScale }] }}>
-                  <Text style={{ fontFamily: 'SpaceMono', fontSize: 22, lineHeight: 24, color: done === 6 ? C.green : done >= 3 ? C.gold : C.text }}>
-                    {done}
-                  </Text>
-                  <Text style={{ fontSize: 12, color: C.dim }}>/6</Text>
-                </Animated.View>
-                <Text style={{ fontSize: 9, color: C.dim, marginTop: 2, letterSpacing: 2, textTransform: 'uppercase' }}>Habitudes</Text>
-                <View style={{ flexDirection: 'row', gap: 3, marginTop: 8 }}>
-                  {[0,1,2,3,4,5].map(i => (
-                    <View key={i} style={{
-                      flex: 1, height: 3, borderRadius: 2,
-                      backgroundColor: i < done ? (done === 6 ? C.green : C.gold) : C.s3,
-                    }} />
-                  ))}
-                </View>
-                <Text style={{ fontSize: 8, color: done === 6 ? C.green : C.gold, marginTop: 4 }}>+{calcDayXP(day)} XP</Text>
+              <View style={{ alignItems: 'center', width: 26 }}>
+                <StreakFlame days={streak} compact size={34} />
               </View>
 
             </View>
-          </View>
+          </Animated.View>
 
-          {/* HABITUDES — grille 3×2 */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-            <Text style={{ fontSize: 10, color: C.goldBright, letterSpacing: 3, textTransform: 'uppercase', fontWeight: '700' }}>
-              Habitudes
-            </Text>
-            <Text style={{ fontFamily: 'SpaceMono', fontSize: 11, color: done >= 6 ? C.green : C.gold }}>
-              {done}/6 · +{calcDayXP(day)} XP
-            </Text>
-          </View>
-          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20, justifyContent: 'space-between' }}>
-            {HABIT_KEYS.map(k => {
-              const key = k as string;
-              const active = !!(day as any)[key];
-              return (
+          {/* ── MISSION DU JOUR ── */}
+          <Animated.View style={[S(1), { marginBottom: 14 }]}>
+            <View style={{ borderRadius: 20, overflow: 'hidden', borderWidth: 1, borderColor: GOLD + '33' }}>
+              {/* Image de fond */}
+              <Image source={BG_MISSION} style={{ position: 'absolute', width: '100%', height: '100%' }} resizeMode="cover" />
+              <View style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(7,5,0,0.78)' }} />
+
+              <View style={{ padding: 20 }}>
+                {/* Header */}
+                <Text style={{ fontSize: 9, color: GOLD, letterSpacing: 3, textTransform: 'uppercase', marginBottom: 10, fontWeight: '700' }}>
+                  MISSION DU JOUR
+                </Text>
+
+                <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                  <View style={{ flex: 1 }}>
+                    {/* Mission input */}
+                    <TextInput
+                      style={{
+                        fontSize: 24, color: C.text, fontWeight: '800',
+                        lineHeight: 30, minHeight: 30, marginBottom: 16,
+                      }}
+                      value={day.daily_goal || ''}
+                      onChangeText={(v: string) => updateDay({ daily_goal: v })}
+                      placeholder={isFemale ? "Forgée par la discipline." : "Forgé par la discipline."}
+                      placeholderTextColor="rgba(255,255,255,0.25)"
+                      multiline
+                    />
+
+                    {/* Checklist mission */}
+                    {[
+                      { key: 'workout_done', label: 'Séance d\'entraînement', count: `${done >= 1 ? 1 : 0}/1` },
+                      { key: null, label: '6 habitudes complétées', count: `${done}/6` },
+                      { key: 'learning_done', label: 'Lecture / Apprentissage', count: `${day.learning_done ? 1 : 0}/1` },
+                    ].map((item, i) => (
+                      <View key={i} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                          <View style={{
+                            width: 20, height: 20, borderRadius: 10,
+                            borderWidth: 1.5,
+                            borderColor: (item.key ? !!(day as any)[item.key] : done >= 6) ? GOLD : 'rgba(255,255,255,0.2)',
+                            backgroundColor: (item.key ? !!(day as any)[item.key] : done >= 6) ? GOLD + '22' : 'transparent',
+                            alignItems: 'center', justifyContent: 'center',
+                          }}>
+                            {(item.key ? !!(day as any)[item.key] : done >= 6) && (
+                              <Text style={{ color: GOLD, fontSize: 9, fontWeight: '800' }}>✓</Text>
+                            )}
+                          </View>
+                          <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.7)' }}>{item.label}</Text>
+                        </View>
+                        <Text style={{ fontSize: 11, color: C.dim, fontFamily: 'SpaceMono' }}>{item.count}</Text>
+                      </View>
+                    ))}
+                  </View>
+
+                </View>
+              </View>
+            </View>
+          </Animated.View>
+
+          {/* ── STAT TILES ── */}
+          <Animated.View style={[S(2), { marginBottom: 14 }]}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 0, gap: 10 }}
+            >
+              <StatTile
+                icon={STAT_ICONS.calories}
+                value={day.calories ?? 0}
+                target={calTarget}
+                unit="" label="Calories" color={C.red}
+                onChange={v => updateDay({ calories: v })}
+              />
+              <StatTile
+                icon={STAT_ICONS.entrainement}
+                value={day.cardio_min ?? 0}
+                target={60}
+                unit="min" label="Entraîn." color={GOLD}
+                onChange={v => updateDay({ cardio_min: v })}
+              />
+              <StatTile
+                icon={STAT_ICONS.lecture}
+                value={day.learning_min ? parseFloat((day.learning_min / 60).toFixed(1)) : 0}
+                target={1}
+                unit="h" label="Lecture" color='#8B5CF6'
+                keyboardType="decimal-pad"
+                onChange={v => updateDay({ learning_min: v ? Math.round(v * 60) : undefined })}
+              />
+              <StatTile
+                icon={STAT_ICONS.eau}
+                value={day.water_liters ?? 0}
+                target={2}
+                unit="L" label="Eau" color='#38BDF8'
+                keyboardType="decimal-pad"
+                onChange={v => updateDay({ water_liters: v })}
+              />
+            </ScrollView>
+          </Animated.View>
+
+          {/* ── HABITUDES ── */}
+          <Animated.View style={[S(3), { marginBottom: 14 }]}>
+            <Text style={{ fontSize: 11, color: GOLDB, letterSpacing: 3, textTransform: 'uppercase', fontWeight: '700', marginBottom: 14 }}>Habitudes</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ paddingHorizontal: 4, gap: 16 }}
+            >
+              {HABIT_KEYS.map(k => (
                 <HabitOrb
-                  key={key}
-                  habitKey={key}
-                  label={HABIT_LABELS[key]}
-                  active={active}
-                  onPress={() => toggleHabit(key)}
+                  key={k as string}
+                  habitKey={k as string}
+                  label={HABIT_LABELS[k as string]}
+                  active={!!(day as any)[k as string]}
+                  onPress={() => toggleHabit(k as string)}
                 />
-              );
-            })}
-          </View>
+              ))}
+            </ScrollView>
+          </Animated.View>
 
-          {/* MISSION DU JOUR */}
-          <View style={missionStyles.card}>
-            {/* Header */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-              <Text style={{ fontFamily: 'Cinzel', color: C.goldBright, fontSize: 10, letterSpacing: 4 }}>MISSION DU JOUR</Text>
-              <View style={{ flex: 1, height: 1, backgroundColor: C.goldDim }} />
-              <Text style={{ fontFamily: 'Cinzel', color: day.daily_goal?.trim() ? C.green : C.goldDim, fontSize: 9, letterSpacing: 1 }}>
-                {day.daily_goal?.trim() ? '✓ DÉFINIE' : 'À DÉFINIR'}
-              </Text>
+          {/* ── QUÊTES — bannière cliquable ── */}
+          <Animated.View style={[S(4), { marginBottom: 14 }]}>
+            <TouchableOpacity onPress={() => setShowQuests(true)} activeOpacity={0.88}>
+              <View style={{
+                borderRadius: 18, overflow: 'hidden',
+                borderWidth: 1, borderColor: GOLD + '44',
+              }}>
+                <Image source={BG_MISSION} style={{ position: 'absolute', width: '100%', height: '100%' }} resizeMode="cover" />
+                <View style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(7,5,0,0.80)' }} />
+                <View style={{ padding: 18, flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+                  {/* Badge progression */}
+                  <View style={{ width: 52, height: 52, borderRadius: 26, borderWidth: 2, borderColor: GOLD, backgroundColor: GOLD + '22', alignItems: 'center', justifyContent: 'center' }}>
+                    <Text style={{ fontFamily: 'SpaceMono', fontSize: 16, color: GOLD, fontWeight: '700' }}>
+                      {todayQuests.filter(q => completedQuests.has(q.id) || q.check(day)).length}/{todayQuests.length}
+                    </Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 9, color: GOLD, letterSpacing: 3, textTransform: 'uppercase', fontWeight: '700', marginBottom: 4 }}>QUÊTES DU JOUR</Text>
+                    <Text style={{ fontSize: 15, color: C.text, fontWeight: '700' }}>
+                      {todayQuests.filter(q => completedQuests.has(q.id) || q.check(day)).length === todayQuests.length
+                        ? 'Toutes les quêtes complétées !'
+                        : 'Accomplir mes quêtes du jour'}
+                    </Text>
+                    {todayQuests.reduce((acc, q) => acc + ((completedQuests.has(q.id) || q.check(day)) ? q.xp : 0), 0) > 0 && (
+                      <Text style={{ fontFamily: 'SpaceMono', fontSize: 12, color: GOLD, marginTop: 4 }}>
+                        +{todayQuests.reduce((acc, q) => acc + ((completedQuests.has(q.id) || q.check(day)) ? q.xp : 0), 0)} XP gagnés
+                      </Text>
+                    )}
+                  </View>
+                  <Text style={{ color: GOLD, fontSize: 22 }}>›</Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+          </Animated.View>
+
+          {/* ── CITATION ── */}
+          <Animated.View style={[S(5), { marginBottom: 24 }]}>
+            <View style={{ borderRadius: 20, overflow: 'hidden', borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)' }}>
+              <Image source={BG_QUOTE} style={{ position: 'absolute', width: '100%', height: '100%' }} resizeMode="cover" />
+              <View style={{ position: 'absolute', inset: 0, backgroundColor: 'rgba(4,3,8,0.82)' }} />
+              <View style={{ padding: 20, flexDirection: 'row', gap: 14, alignItems: 'flex-start' }}>
+                <Text style={{ fontFamily: 'Cinzel', fontSize: 28, color: GOLD, lineHeight: 28, marginTop: -4 }}>❝</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 14, color: C.text, lineHeight: 22, fontStyle: 'italic' }}>
+                    La discipline est le pont entre{'\n'}
+                    <Text style={{ color: GOLDB }}>tes objectifs et leur accomplissement.</Text>
+                  </Text>
+                </View>
+              </View>
             </View>
+          </Animated.View>
 
-            {/* Champ mission */}
-            <TextInput
-              style={missionStyles.input}
-              value={day.daily_goal || ''}
-              onChangeText={(v: string) => updateDay({ daily_goal: v })}
-              placeholder="Qu'est-ce que tu dois accomplir aujourd'hui ?"
-              placeholderTextColor={C.dim}
-              multiline
-              blurOnSubmit
-            />
-
-            {/* Séparateur */}
-            <View style={{ height: 1, backgroundColor: C.s3, marginVertical: 14 }} />
-
-            {/* Actions rapides avec ActionRow */}
-            <ActionRow
-              icon="💧" label="Eau au réveil"
-              active={!!day.morning_water}
-              onPress={v => updateDay({ morning_water: v })}
-            />
-            <ActionRow
-              icon="📚" label="Apprentissage"
-              sub="Lecture, podcast, cours..."
-              active={!!day.learning_done}
-              onPress={v => updateDay({ learning_done: v })}
-            />
-          </View>
-
-          {/* QUÊTES DU JOUR */}
-          <DailyQuests
-            quests={todayQuests}
-            day={day}
-            completedIds={completedQuests}
-          />
         </View>
       </ScrollView>
 
-      {milestoneToShow && (
-        <MilestoneModal milestone={milestoneToShow} onClose={() => setMilestoneToShow(null)} />
-      )}
-
-      {questBanner && (
-        <QuestBanner quest={questBanner} onDismiss={() => setQuestBanner(null)} />
-      )}
-
+      {/* Modals */}
+      {milestoneToShow && <MilestoneModal milestone={milestoneToShow} onClose={() => setMilestone(null)} />}
+      {questBanner && <QuestBanner quest={questBanner} onDismiss={() => setQuestBanner(null)} />}
       <PerfectDayCelebration trigger={showPerfectDay} />
-
-      {levelUpRank && (
-        <LevelUpModal rank={levelUpRank} onClose={() => { stop('levelup'); setLevelUpRank(null); }} />
-      )}
-
-      {showEveningSummary && (
-        <EveningSummary
-          done={done}
-          total={HABIT_KEYS.length}
-          onDismiss={() => setShowEveningSummary(false)}
-        />
-      )}
-
-      <WeeklyRecapModal
-  visible={showRecap}
-  data={recapData}
-  onClose={closeRecap}
-/>
+      {levelUpRank && <LevelUpModal rank={levelUpRank} gender={gender} onClose={() => { stop('levelup'); setLevelUpRank(null); }} />}
+      {showEveningSummary && <EveningSummary done={done} total={HABIT_KEYS.length} onDismiss={() => setEvening(false)} />}
+      <WeeklyRecapModal visible={showRecap} data={recapData} onClose={closeRecap} />
+      <QuestsScreen
+        visible={showQuests}
+        onClose={() => setShowQuests(false)}
+        quests={todayQuests}
+        day={day}
+        completedIds={completedQuests}
+        streak={streak}
+      />
+      <Modal visible={showNotif} animationType="slide" presentationStyle="pageSheet">
+        <View style={{ flex: 1, backgroundColor: C.bg }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16, borderBottomWidth: 1, borderBottomColor: C.s3 }}>
+            <TouchableOpacity onPress={() => setShowNotif(false)}>
+              <Text style={{ color: C.dim, fontSize: 14 }}>Fermer</Text>
+            </TouchableOpacity>
+            <Text style={{ fontFamily: 'Cinzel', fontSize: 15, color: GOLDB, letterSpacing: 2 }}>NOTIFICATIONS</Text>
+            <View style={{ width: 60 }} />
+          </View>
+          <ScrollView contentContainerStyle={{ padding: 20 }}>
+            <NotificationSettings />
+          </ScrollView>
+        </View>
+      </Modal>
     </View>
   );
 }
+
+// ─── XPPopup ──────────────────────────────────────────────────────────────────
+function XPPopup({ xp }: { xp: number }) {
+  const anim = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    Animated.sequence([
+      Animated.timing(anim, { toValue: 1, duration: 300, useNativeDriver: true }),
+      Animated.delay(800),
+      Animated.timing(anim, { toValue: 0, duration: 300, useNativeDriver: true }),
+    ]).start();
+  }, []);
+  return (
+    <Animated.View style={{
+      opacity: anim,
+      transform: [{ translateY: anim.interpolate({ inputRange: [0,1], outputRange: [10, -20] }) }],
+      marginBottom: 4,
+    }}>
+      <Text style={{ fontFamily: 'SpaceMono', fontSize: 20, fontWeight: '700', color: GOLD }}>+{xp} XP</Text>
+    </Animated.View>
+  );
+}
+
+const styles = StyleSheet.create({});

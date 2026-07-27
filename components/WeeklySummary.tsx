@@ -32,7 +32,7 @@ function dayLabel(dateStr: string): string {
 
 function getVerdict(avgScore: number, workouts: number): { label: string; sub: string; color: string } {
   if (avgScore >= 85 && workouts >= 4)
-    return { label: '⚔️ SEMAINE DE CONQUÉRANT', sub: 'Tu as dominé cette semaine. Continue.', color: C.goldBright };
+    return { label: '⚔ SEMAINE DE CONQUÉRANT', sub: 'Tu as dominé cette semaine. Continue.', color: C.goldBright };
   if (avgScore >= 70)
     return { label: '🔥 SEMAINE SOLIDE', sub: 'Bonne régularité. Pousse encore.', color: C.gold };
   if (avgScore >= 50)

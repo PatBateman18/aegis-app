@@ -7,6 +7,7 @@ import {
 } from 'react-native';
 import Svg, { Path, Defs, LinearGradient as SvgGrad, Stop } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import MedalBadge from '@/components/MedalBadge';
 import { C } from '@/constants/colors';
 import { type StreakMilestone } from '@/constants/rpg';
@@ -18,7 +19,7 @@ const XP_PER_BADGE = 60;
 
 const ZONE_H  = 460;
 const BADGE_S = 100;
-const TOTAL_H = (n: number) => n * ZONE_H + 60;
+const TOTAL_H = (n: number) => n * ZONE_H;
 
 const MEDAL_BG = [
   require('@/assets/medals/bg_bronze.png'),
@@ -31,12 +32,23 @@ const MEDAL_BG = [
   require('@/assets/medals/bg_legend.png'),
 ];
 
+const MEDAL_BG_FEMALE = [
+  require('@/assets/medals/bg_bronze_femme.png'),
+  require('@/assets/medals/bg_silver_femme.png'),
+  require('@/assets/medals/bg_gold_femme.png'),
+  require('@/assets/medals/bg_platinum_femme.png'),
+  require('@/assets/medals/bg_conqueror_femme.png'),
+  require('@/assets/medals/bg_diamond_femme.png'),
+  require('@/assets/medals/bg_centurion.png'),   // pas de version femme
+  require('@/assets/medals/bg_legend.png'),       // pas de version femme
+];
+
 function bx(i: number) { return i % 2 === 0 ? width * 0.65 : width * 0.30; }
 function by(i: number) { return i * ZONE_H + ZONE_H * 0.48; }
 
 // ─── Badge — aucun halo, aucun cercle ────────────────────────────────────────
-function CleanBadge({ m, i, achieved, streak }: {
-  m: StreakMilestone; i: number; achieved: boolean; streak: number;
+function CleanBadge({ m, i, achieved, streak, gender = 'male' }: {
+  m: StreakMilestone; i: number; achieved: boolean; streak: number; gender?: string;
 }) {
   const scale = useRef(new Animated.Value(achieved ? 1 : 0.88)).current;
   const prev  = useRef(achieved);
@@ -53,7 +65,7 @@ function CleanBadge({ m, i, achieved, streak }: {
 
   return (
     <Animated.View style={{ transform: [{ scale }], alignItems: 'center' }}>
-      <MedalBadge milestoneIndex={i} achieved={achieved} size={BADGE_S} />
+      <MedalBadge milestoneIndex={i} achieved={achieved} size={BADGE_S} gender={gender} />
       {!achieved && (
         <View style={s.lockBadge}>
           <Text style={{ fontSize: 10 }}>🔒</Text>
@@ -64,12 +76,42 @@ function CleanBadge({ m, i, achieved, streak }: {
 }
 
 // ─── Panneau info (ouvert via bouton i) ──────────────────────────────────────
-function InfoPanel({ milestones, streak, bestStreak, unlockedSet, onClose }: {
+
+// ─── MedalImage — chargement avec placeholder + fondu ────────────────────────
+function MedalImage({ source, achieved }: { source: any; achieved: boolean }) {
+  const opacity = useRef(new Animated.Value(0)).current;
+
+  function onLoad() {
+    Animated.timing(opacity, {
+      toValue: 1, duration: 400, useNativeDriver: true,
+    }).start();
+  }
+
+  return (
+    <View style={{ width: '100%', height: '100%' }}>
+      {/* Placeholder doré pendant le chargement */}
+      <View style={{
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: '#0A0800',
+      }} />
+      <Animated.Image
+        source={source}
+        style={{ width: '100%', height: '100%', opacity: Animated.multiply(opacity, achieved ? 0.88 : 0.12) }}
+        blurRadius={achieved ? 0 : 12}
+        resizeMode="cover"
+        onLoad={onLoad}
+      />
+    </View>
+  );
+}
+
+function InfoPanel({ milestones, streak, bestStreak, unlockedSet, onClose, gender = 'male' }: {
   milestones: StreakMilestone[];
   streak: number;
   bestStreak: number;
   unlockedSet: Set<number>;
   onClose: () => void;
+  gender?: string;
 }) {
   return (
     <Modal visible animationType="slide" transparent>
@@ -91,7 +133,7 @@ function InfoPanel({ milestones, streak, bestStreak, unlockedSet, onClose }: {
                   borderWidth: 1, borderColor: achieved ? m.color + '44' : C.s3,
                   borderRadius: 14, padding: 14, marginBottom: 10,
                 }}>
-                  <MedalBadge milestoneIndex={i} achieved={achieved} size={56} />
+                  <MedalBadge milestoneIndex={i} achieved={achieved} size={56} gender={gender} />
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontFamily: 'Cinzel', fontSize: 12, color: achieved ? m.color : C.dim, letterSpacing: 1, marginBottom: 3 }}>
                       {m.title.toUpperCase()}
@@ -135,11 +177,13 @@ interface Props {
   streak: number;
   bestStreak: number;
   unlockedSet: Set<number>;
+  gender?: string;
 }
 
-export default function VoyageModal({ visible, onClose, milestones, streak, bestStreak, unlockedSet }: Props) {
+export default function VoyageModal({ visible, onClose, milestones, streak, bestStreak, unlockedSet, gender = 'male' }: Props) {
   const insets    = useSafeAreaInsets();
   const [showInfo, setShowInfo] = useState(false);
+  const medalBg   = gender === 'female' ? MEDAL_BG_FEMALE : MEDAL_BG;
   const n         = milestones.length;
   const totalH    = TOTAL_H(n);
   const totalDays = milestones[n - 1]?.days ?? 1;
@@ -165,7 +209,7 @@ export default function VoyageModal({ visible, onClose, milestones, streak, best
         {/* Header */}
         <View style={[s.header, { paddingTop: insets.top + 8 }]}>
           <TouchableOpacity onPress={onClose} style={s.headerBtn}>
-            <Text style={{ color: GOLDB, fontSize: 22, lineHeight: 26 }}>‹</Text>
+            <Text style={{ color: GOLDB, fontSize: 22, lineHeight: 22, marginTop: 1 }}>‹</Text>
           </TouchableOpacity>
           <View style={{ flex: 1, alignItems: 'center' }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -194,25 +238,23 @@ export default function VoyageModal({ visible, onClose, milestones, streak, best
                   top: i * ZONE_H, left: 0, right: 0, height: ZONE_H,
                   overflow: 'hidden',
                 }}>
-                  <Image
-                    source={MEDAL_BG[Math.min(i, MEDAL_BG.length - 1)]}
-                    style={{ width: '100%', height: '100%', opacity: achieved ? 0.88 : 0.12 }}
-                    blurRadius={achieved ? 0 : 12}
-                    resizeMode="cover"
+                  <MedalImage
+                    source={medalBg[Math.min(i, medalBg.length - 1)]}
+                    achieved={achieved}
                   />
-                  {/* Fondu bas */}
-                  <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 90 }}>
-                    {[0, 0.12, 0.3, 0.52, 0.74, 0.9].map((op, j) => (
-                      <View key={j} style={{ flex: 1, backgroundColor: `rgba(4,3,10,${op})` }} />
-                    ))}
-                  </View>
-                  {/* Fondu haut */}
+                  {/* Fondu bas — découpe nette */}
+                  <LinearGradient
+                    colors={['transparent', 'rgba(4,3,10,0.95)']}
+                    locations={[0.5, 1]}
+                    style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 80 }}
+                  />
+                  {/* Fondu haut — découpe nette */}
                   {i > 0 && (
-                    <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 70 }}>
-                      {[0.9, 0.65, 0.35, 0.12, 0.03, 0].map((op, j) => (
-                        <View key={j} style={{ flex: 1, backgroundColor: `rgba(4,3,10,${op})` }} />
-                      ))}
-                    </View>
+                    <LinearGradient
+                      colors={['rgba(4,3,10,0.95)', 'transparent']}
+                      locations={[0, 0.5]}
+                      style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 60 }}
+                    />
                   )}
                   {!achieved && (
                     <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.5)' }]} />
@@ -255,7 +297,7 @@ export default function VoyageModal({ visible, onClose, milestones, streak, best
                   alignItems: 'center',
                   justifyContent: 'center',
                 }}>
-                  <CleanBadge m={m} i={i} achieved={achieved} streak={streak} />
+                  <CleanBadge m={m} i={i} achieved={achieved} streak={streak} gender={gender} />
                 </View>
               );
             })}
@@ -299,6 +341,7 @@ export default function VoyageModal({ visible, onClose, milestones, streak, best
           streak={streak}
           bestStreak={bestStreak}
           unlockedSet={unlockedSet}
+          gender={gender}
           onClose={() => setShowInfo(false)}
         />
       )}

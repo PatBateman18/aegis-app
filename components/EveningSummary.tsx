@@ -37,7 +37,7 @@ export default function EveningSummary({ done, total, onDismiss }: Props) {
   const getMessage = () => {
     if (done === total) return { emoji: '✦', text: 'Journée complète. Repos mérité.', sub: null };
     if (remaining === 1) return { emoji: '⚡', text: 'Plus qu\'une habitude à valider.', sub: `Il reste : ${remaining} habitude` };
-    return { emoji: '🌙', text: `${remaining} habitudes restantes ce soir.`, sub: `${done}/${total} validées aujourd'hui` };
+    return { emoji: '☽', text: `${remaining} habitudes restantes ce soir.`, sub: `${done}/${total} validées aujourd'hui` };
   };
 
   const msg = getMessage();

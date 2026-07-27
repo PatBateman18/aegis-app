@@ -219,7 +219,7 @@ export function ActionRow({
             backgroundColor: iconBg,
             alignItems: 'center', justifyContent: 'center',
           }}>
-            <Text style={{ fontSize: 18 }}>{icon}</Text>
+            <Text style={{ fontSize: 18, color: active ? acc : C.dim }}>{icon}</Text>
           </Animated.View>
 
           {/* Texte */}

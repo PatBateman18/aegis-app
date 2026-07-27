@@ -3,7 +3,19 @@ import { View, Text, StyleSheet, Animated } from 'react-native';
 import { C } from '@/constants/colors';
 import { getRank, getXPProgress, getXPNeeded, getNextMilestone, RANKS } from '@/constants/rpg';
 
-export function XPBar({ totalXP, style }: { totalXP: number; style?: any }) {
+const FEMALE_RANK_NAMES: Record<string, string> = {
+  'INITIÉ':     'INITIÉE',
+  'GUERRIER':   'GUERRIÈRE',
+  'CONQUÉRANT': 'CONQUÉRANTE',
+  'CHAMPION':   'CHAMPIONNE',
+  'MAÎTRE':     'MAÎTRESSE',
+};
+
+function rankDisplayName(name: string, gender: string): string {
+  return gender === 'female' ? (FEMALE_RANK_NAMES[name] ?? name) : name;
+}
+
+export function XPBar({ totalXP, style, gender = 'male' }: { totalXP: number; style?: any; gender?: string }) {
   const rank = getRank(totalXP);
   const progress = getXPProgress(totalXP);
   const xpNeeded = getXPNeeded(totalXP);
@@ -21,12 +33,12 @@ export function XPBar({ totalXP, style }: { totalXP: number; style?: any }) {
     <View style={[styles.container, style]}>
       <View style={styles.header}>
         <View>
-          <Text style={[styles.rankName, { color: rank.color }]}>{rank.name}</Text>
+          <Text style={[styles.rankName, { color: rank.color }]}>{rankDisplayName(rank.name, gender)}</Text>
           <Text style={styles.level}>Niveau {rank.level}</Text>
         </View>
         <View style={styles.xpBadge}>
           <Text style={[styles.xpTotal, { color: rank.color }]}>{totalXP} XP</Text>
-          {rank.level < 10 && (
+          {rank.level < 100 && (
             <Text style={styles.xpNeeded}>{xpNeeded} XP restants</Text>
           )}
         </View>
@@ -57,7 +69,7 @@ export function XPBar({ totalXP, style }: { totalXP: number; style?: any }) {
         <Text style={[styles.rankMin, { color: rank.color + '88' }]}>
           {rank.level > 1 ? RANKS[rank.level - 2]?.name : ''}
         </Text>
-        {rank.level < 10 && (
+        {rank.level < 100 && (
           <Text style={[styles.rankMax, { color: rank.color + '88' }]}>
             {RANKS[rank.level]?.name}
           </Text>
@@ -67,7 +79,7 @@ export function XPBar({ totalXP, style }: { totalXP: number; style?: any }) {
   );
 }
 
-export function RankBadge({ totalXP, size = 'normal' }: { totalXP: number; size?: 'small' | 'normal' | 'large' }) {
+export function RankBadge({ totalXP, size = 'normal', gender = 'male' }: { totalXP: number; size?: 'small' | 'normal' | 'large'; gender?: string }) {
   const rank = getRank(totalXP);
   const isLarge = size === 'large';
   const isSmall = size === 'small';
@@ -80,7 +92,7 @@ export function RankBadge({ totalXP, size = 'normal' }: { totalXP: number; size?
       isSmall && styles.badgeSmall,
     ]}>
       <Text style={[styles.badgeText, { color: rank.color }, isLarge && styles.badgeTextLarge, isSmall && styles.badgeTextSmall]}>
-        {rank.name}
+        {rankDisplayName(rank.name, gender)}
       </Text>
       <Text style={[styles.badgeLevel, isLarge && { fontSize: 11 }, isSmall && { fontSize: 8 }]}>
         LVL {rank.level}

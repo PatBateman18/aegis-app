@@ -10,18 +10,55 @@ import { type Rank } from '@/constants/rpg';
 
 const { width, height } = Dimensions.get('window');
 
-// ─── Contenu par rang ─────────────────────────────────────────────────────────
-const RANK_CONTENT: Record<string, { tagline: string; quote: string }> = {
-  'INITIÉ':     { tagline: 'Le voyage commence.',             quote: '"Chaque maître a été un débutant."' },
-  'DISCIPLE':   { tagline: 'La discipline devient identité.', quote: '"Ce que tu répètes, tu le deviens."' },
-  'GUERRIER':   { tagline: 'Tu as prouvé ta constance.',      quote: '"La bataille se gagne avant d\'être livrée."' },
-  'STRATÈGE':   { tagline: "L'esprit guide le corps.",        quote: '"Celui qui pense gagne avant d\'agir."' },
-  'CONQUÉRANT': { tagline: 'Rien ne te résiste.',             quote: '"Il n\'attend pas. Il avance."' },
-  'CHAMPION':   { tagline: 'Tu inspires sans le savoir.',     quote: '"Le champion est fait de défaites surmontées."' },
-  'MAÎTRE':     { tagline: 'La maîtrise est ton standard.',   quote: '"La perfection n\'est pas un but. C\'est une habitude."' },
-  'ÉLITE':      { tagline: 'Tu appartiens au sommet.',        quote: '"Peu arrivent ici. Tu y es."' },
-  'AEGIS':      { tagline: 'Tu es devenu la légende.',        quote: '"La légende ne se raconte pas. Elle se vit."' },
+// ─── Noms de rangs féminins ───────────────────────────────────────────────────
+const FEMALE_RANK_NAMES: Record<string, string> = {
+  'INITIÉ':     'INITIÉE',
+  'GUERRIER':   'GUERRIÈRE',
+  'CONQUÉRANT': 'CONQUÉRANTE',
+  'CHAMPION':   'CHAMPIONNE',
+  'MAÎTRE':     'MAÎTRESSE',
 };
+
+// ─── Contenu par rang (affiché quand on entre dans un nouveau rang) ───────────
+const RANK_CONTENT: Record<string, { tagline: string; quote: string }> = {
+  'NOVICE':     { tagline: 'Le voyage commence ici.',          quote: '"Chaque légende a commencé au niveau 1."' },
+  'INITIÉ':     { tagline: 'La discipline prend racine.',      quote: '"Chaque maître a été un débutant."' },
+  'DISCIPLE':   { tagline: 'La discipline devient identité.',  quote: '"Ce que tu répètes, tu le deviens."' },
+  'GUERRIER':   { tagline: 'Tu as prouvé ta constance.',       quote: '"La bataille se gagne avant d\'être livrée."' },
+  'STRATÈGE':   { tagline: "L'esprit guide le corps.",         quote: '"Celle qui pense gagne avant d\'agir."' },
+  'CONQUÉRANT': { tagline: 'Rien ne te résiste.',              quote: '"Il n\'attend pas. Il avance."' },
+  'CHAMPION':   { tagline: 'Tu inspires sans le savoir.',      quote: '"Le champion est fait de défaites surmontées."' },
+  'MAÎTRE':     { tagline: 'La maîtrise est ton standard.',    quote: '"La perfection n\'est pas un but. C\'est une habitude."' },
+  'ÉLITE':      { tagline: 'Tu appartiens au sommet.',         quote: '"Peu arrivent ici. Tu y es."' },
+  'AEGIS':      { tagline: 'Tu es devenu la légende.',         quote: '"La légende ne se raconte pas. Elle se vit."' },
+};
+
+const RANK_CONTENT_FEMALE: Record<string, { tagline: string; quote: string }> = {
+  'NOVICE':     { tagline: 'Le voyage commence ici.',          quote: '"Chaque légende a commencé au niveau 1."' },
+  'INITIÉ':     { tagline: 'La discipline prend racine.',      quote: '"Chaque maîtresse a été une débutante."' },
+  'DISCIPLE':   { tagline: 'La discipline devient identité.',  quote: '"Ce que tu répètes, tu le deviens."' },
+  'GUERRIER':   { tagline: 'Tu as prouvé ta constance.',       quote: '"La bataille se gagne avant d\'être livrée."' },
+  'STRATÈGE':   { tagline: "L'esprit guide le corps.",         quote: '"Celle qui pense gagne avant d\'agir."' },
+  'CONQUÉRANT': { tagline: 'Rien ne te résiste.',              quote: '"Elle n\'attend pas. Elle avance."' },
+  'CHAMPION':   { tagline: 'Tu inspires sans le savoir.',      quote: '"La championne est faite de défaites surmontées."' },
+  'MAÎTRE':     { tagline: 'La maîtrise est ton standard.',    quote: '"La perfection n\'est pas un but. C\'est une habitude."' },
+  'ÉLITE':      { tagline: 'Tu appartiens au sommet.',         quote: '"Peu arrivent ici. Tu y es."' },
+  'AEGIS':      { tagline: 'Tu es devenue la légende.',        quote: '"La légende ne se raconte pas. Elle se vit."' },
+};
+
+// ─── Messages de level up dans un même rang ───────────────────────────────────
+const LEVEL_MESSAGES: { tagline: string; quote: string }[] = [
+  { tagline: 'Un pas de plus.',              quote: '"La progression est une promesse tenue."' },
+  { tagline: 'La constance paye.',           quote: '"Petit à petit, l\'oiseau fait son nid."' },
+  { tagline: 'Tu avances.',                  quote: '"Chaque jour compte."' },
+  { tagline: 'La routine forge l\'acier.',   quote: '"Discipline maintenant. Liberté demain."' },
+  { tagline: 'Le travail silencieux paie.',  quote: '"Ce que tu fais quand personne ne regarde."' },
+  { tagline: 'Encore un niveau.',            quote: '"L\'excellence est une habitude."' },
+  { tagline: 'Tu ne t\'arrêtes pas.',        quote: '"Un jour de plus. Une victoire de plus."' },
+  { tagline: 'La progression continue.',     quote: '"Le chemin est la destination."' },
+  { tagline: 'Tu construis quelque chose.', quote: '"L\'empire se construit dans l\'obscurité."' },
+  { tagline: 'Le meilleur reste à venir.',   quote: '"Chaque niveau te rapproche d\'AEGIS."' },
+];
 
 // ─── Particule dorée ──────────────────────────────────────────────────────────
 function GlowParticle({ x, delay }: { x: number; delay: number }) {
@@ -66,9 +103,9 @@ function GlowParticle({ x, delay }: { x: number; delay: number }) {
 }
 
 // ─── Modal principal ──────────────────────────────────────────────────────────
-type Props = { rank: Rank | null; onClose: () => void };
+type Props = { rank: Rank | null; onClose: () => void; gender?: string };
 
-export default function LevelUpModal({ rank, onClose }: Props) {
+export default function LevelUpModal({ rank, onClose, gender = 'male' }: Props) {
   const visible = !!rank;
 
   const bgOpacity   = useRef(new Animated.Value(0)).current;
@@ -118,7 +155,15 @@ export default function LevelUpModal({ rank, onClose }: Props) {
 
   if (!rank) return null;
 
-  const content = RANK_CONTENT[rank.name] ?? { tagline: 'Tu progresses.', quote: '"Continue."' };
+  const isFemale = gender === 'female';
+  const rankContentMap = isFemale ? RANK_CONTENT_FEMALE : RANK_CONTENT;
+  const displayName = isFemale ? (FEMALE_RANK_NAMES[rank.name] ?? rank.name) : rank.name;
+
+  // Contenu : message de rang si premier niveau du rang, sinon message rotatif
+  const isRankEntry = rank.level % 10 === 1 || rank.level === 1 || rank.level === 100;
+  const content = isRankEntry
+    ? (rankContentMap[rank.name] ?? { tagline: 'Nouveau rang atteint.', quote: '"Continue."' })
+    : LEVEL_MESSAGES[(rank.level - 1) % LEVEL_MESSAGES.length];
   const lineW   = lineWidth.interpolate({ inputRange: [0, 1], outputRange: ['0%', '65%'] });
 
   return (
@@ -142,11 +187,16 @@ export default function LevelUpModal({ rank, onClose }: Props) {
           </Animated.Text>
 
           {/* Nom du rang — titre brillant */}
-          <Animated.Text style={[
-            styles.rankName,
-            { opacity: rankOpacity, transform: [{ scale: rankScale }] },
-          ]}>
-            {rank.name}
+          <Animated.Text
+            adjustsFontSizeToFit
+            numberOfLines={1}
+            style={[
+              styles.rankName,
+              displayName.length > 7 ? { fontSize: 40, letterSpacing: 2 } :
+              displayName.length > 5 ? { fontSize: 50, letterSpacing: 4 } : {},
+              { opacity: rankOpacity, transform: [{ scale: rankScale }] },
+            ]}>
+            {displayName}
           </Animated.Text>
 
           {/* Niveau */}
