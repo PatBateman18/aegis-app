@@ -8,6 +8,7 @@ import { C } from '@/constants/colors';
 import { MENTORS, getMentor, type MentorId, type Mentor } from '@/constants/mentors';
 import { getDailyMentorMessage } from '@/constants/mentorMessages';
 import { usePremium } from '@/hooks/usePremium';
+import PaywallScreen from './PaywallScreen';
 
 const { width, height } = Dimensions.get('window');
 const GOLD  = '#C9A84C';
@@ -46,9 +47,10 @@ type Filter = 'all' | 'unlocked' | 'locked';
 
 export default function MentorScreen({ visible, onClose, mentorId, onSelectMentor, gender, userId }: Props) {
   const insets = useSafeAreaInsets();
-  const { isPremium } = usePremium(userId);
+  const { isPremium, reload: reloadPremium } = usePremium(userId);
   const mentor = getMentor(mentorId);
   const [filter, setFilter] = useState<Filter>('all');
+  const [showPaywall, setShowPaywall] = useState(false);
   const heroScale = useRef(new Animated.Value(1)).current;
 
   // Respiration lente du hero, comme sur les autres pages
@@ -84,8 +86,8 @@ export default function MentorScreen({ visible, onClose, mentorId, onSelectMento
     return (
       <TouchableOpacity
         key={m.id}
-        disabled={locked}
-        onPress={() => onSelectMentor(m.id)}
+        disabled={false}
+        onPress={() => locked ? setShowPaywall(true) : onSelectMentor(m.id)}
         activeOpacity={0.8}
         style={{
           width: CARD_W,
@@ -253,6 +255,12 @@ export default function MentorScreen({ visible, onClose, mentorId, onSelectMento
           </View>
         </ScrollView>
       </View>
+
+      <PaywallScreen
+        visible={showPaywall}
+        onClose={() => setShowPaywall(false)}
+        onPurchaseSuccess={reloadPremium}
+      />
     </Modal>
   );
 }
