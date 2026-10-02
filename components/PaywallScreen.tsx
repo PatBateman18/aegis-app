@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
-  Modal, ScrollView, ActivityIndicator, Alert, Image, Dimensions, Animated,
+  Modal, ScrollView, ActivityIndicator, Alert, Image, Dimensions, Animated, Linking,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Purchases, { PurchasesOffering, PurchasesPackage } from 'react-native-purchases';
@@ -24,6 +24,19 @@ const GOLD = C.gold;
 const GOLD_BRIGHT = C.goldBright;
 
 const HERO_IMAGE = require('@/assets/paywall/paywall_hero.png');
+
+// Pages légales hébergées sur GitHub Pages (dépôt public `aegis-legal`).
+// Apple exige des liens fonctionnels vers les deux dans l'app ET dans App Store Connect.
+const LEGAL_URLS = {
+  terms: 'https://patbateman18.github.io/aegis-legal/cgu.html',
+  privacy: 'https://patbateman18.github.io/aegis-legal/confidentialite.html',
+};
+
+function openLegal(url: string) {
+  Linking.openURL(url).catch(() => {
+    Alert.alert('Lien indisponible', "Impossible d'ouvrir la page pour l'instant. Réessaie plus tard.");
+  });
+}
 
 // Largeur réelle de l'écran : le hero doit la prendre en entier (bord à bord),
 // width: '100%' + marge négative ne suffit pas car le contenu est centré.
@@ -377,9 +390,19 @@ export default function PaywallScreen({ visible, onClose, onPurchaseSuccess }: P
           </TouchableOpacity>
 
           <View style={styles.legalRow}>
-            <Text style={styles.legalText}>Conditions d'utilisation</Text>
+            <TouchableOpacity
+              onPress={() => openLegal(LEGAL_URLS.terms)}
+              hitSlop={{ top: 12, bottom: 12, left: 10, right: 10 }}
+            >
+              <Text style={styles.legalText}>Conditions d'utilisation</Text>
+            </TouchableOpacity>
             <Text style={styles.legalDot}>·</Text>
-            <Text style={styles.legalText}>Confidentialité</Text>
+            <TouchableOpacity
+              onPress={() => openLegal(LEGAL_URLS.privacy)}
+              hitSlop={{ top: 12, bottom: 12, left: 10, right: 10 }}
+            >
+              <Text style={styles.legalText}>Confidentialité</Text>
+            </TouchableOpacity>
           </View>
         </ScrollView>
 
@@ -549,8 +572,8 @@ const styles = StyleSheet.create({
   restoreBtn: { marginTop: 20 },
   restoreText: { color: C.dim, fontSize: 13, textDecorationLine: 'underline' },
   legalRow: { flexDirection: 'row', marginTop: 10, alignItems: 'center' },
-  legalText: { color: C.dim, fontSize: 10, opacity: 0.7 },
-  legalDot: { color: C.dim, fontSize: 10, marginHorizontal: 6, opacity: 0.7 },
+  legalText: { color: C.dim, fontSize: 11, textDecorationLine: 'underline' },
+  legalDot: { color: C.dim, fontSize: 11, marginHorizontal: 8 },
 
   // CTA sticky
   stickyBar: {
