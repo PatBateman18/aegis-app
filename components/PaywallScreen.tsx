@@ -9,10 +9,10 @@
 //  - Sélecteur de pricing à 3 cartes (radio-select)
 //  - CTA sticky visible pendant tout le scroll
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
-  Modal, ScrollView, ActivityIndicator, Alert, Image,
+  Modal, ScrollView, ActivityIndicator, Alert, Image, Dimensions, Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Purchases, { PurchasesOffering, PurchasesPackage } from 'react-native-purchases';
@@ -24,6 +24,11 @@ const GOLD = C.gold;
 const GOLD_BRIGHT = C.goldBright;
 
 const HERO_IMAGE = require('@/assets/paywall/paywall_hero.png');
+
+// Largeur réelle de l'écran : le hero doit la prendre en entier (bord à bord),
+// width: '100%' + marge négative ne suffit pas car le contenu est centré.
+const SCREEN_W = Dimensions.get('window').width;
+const HERO_HEIGHT = SCREEN_W * 1.25; // ratio 4:5
 
 // ─── Rangée d'icônes premium (haut de page) ────────────────────────────────
 const FEATURE_ICONS = [
@@ -98,6 +103,75 @@ function sortPackages(pkgs: PurchasesPackage[]): PurchasesPackage[] {
     const bi = PACKAGE_DISPLAY_ORDER.indexOf(b.packageType);
     return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
   });
+}
+
+
+// ─── Carte de tarif : la carte sélectionnée passe "devant" (plus grande, plus
+// lumineuse, avec un halo doré), les autres reculent (plus petites, ternes). ──
+function tierLabel(pkg: PurchasesPackage): string {
+  switch (pkg.packageType) {
+    case 'MONTHLY': return '1 MOIS';
+    case 'ANNUAL': return '12 MOIS';
+    case 'SIX_MONTH': return '6 MOIS';
+    case 'LIFETIME': return 'À VIE';
+    default: return pkg.product.title;
+  }
+}
+
+function TierCard({
+  pkg, isSelected, onPress,
+}: { pkg: PurchasesPackage; isSelected: boolean; onPress: () => void }) {
+  const anim = useRef(new Animated.Value(isSelected ? 1 : 0)).current;
+
+  useEffect(() => {
+    Animated.spring(anim, {
+      toValue: isSelected ? 1 : 0,
+      useNativeDriver: true,
+      friction: 7,
+      tension: 90,
+    }).start();
+  }, [isSelected]);
+
+  const scale = anim.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1.07] });
+  const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [5, -5] });
+  const opacity = anim.interpolate({ inputRange: [0, 1], outputRange: [0.55, 1] });
+
+  return (
+    <Animated.View
+      style={[
+        styles.tierWrap,
+        { zIndex: isSelected ? 2 : 1, opacity, transform: [{ translateY }, { scale }] },
+      ]}
+    >
+      <TouchableOpacity
+        style={[styles.tierCard, isSelected && styles.tierCardSelected]}
+        onPress={onPress}
+        activeOpacity={0.9}
+      >
+        {pkg.packageType === 'ANNUAL' && (
+          <View style={styles.popularBadgeWrap} pointerEvents="none">
+            <View style={styles.popularBadge}>
+              <Text
+                style={styles.popularBadgeText}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.8}
+              >
+                ★ LE PLUS POPULAIRE
+              </Text>
+            </View>
+          </View>
+        )}
+        <Text style={[styles.tierLabel, isSelected && styles.tierLabelSelected]}>
+          {tierLabel(pkg)}
+        </Text>
+        <Text style={styles.tierPrice}>{pkg.product.priceString}</Text>
+        <View style={[styles.radioOuter, isSelected && styles.radioOuterSelected]}>
+          {isSelected && <View style={styles.radioInner} />}
+        </View>
+      </TouchableOpacity>
+    </Animated.View>
+  );
 }
 
 export default function PaywallScreen({ visible, onClose, onPurchaseSuccess }: Props) {
@@ -188,8 +262,12 @@ export default function PaywallScreen({ visible, onClose, onPurchaseSuccess }: P
 
   return (
     <Modal visible={visible} animationType="slide" transparent={false} onRequestClose={onClose}>
-      <View style={[styles.container, { paddingTop: insets.top }]}>
-        <TouchableOpacity style={styles.closeBtn} onPress={onClose}>
+      <View style={styles.container}>
+        <TouchableOpacity
+          style={[styles.closeBtn, { top: insets.top + 8 }]}
+          onPress={onClose}
+          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+        >
           <Text style={styles.closeText}>✕</Text>
         </TouchableOpacity>
 
@@ -214,18 +292,16 @@ export default function PaywallScreen({ visible, onClose, onPurchaseSuccess }: P
             <Text style={styles.sectionLabel}>✦ AEGIS PREMIUM DÉBLOQUE LE CHEMIN COMPLET ✦</Text>
           </View>
 
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.featureRow}
-          >
+          <View style={styles.featureRow}>
             {FEATURE_ICONS.map((f) => (
               <View key={f.key} style={styles.featureItem}>
                 <Image source={f.icon} style={styles.featureIcon} resizeMode="contain" />
-                <Text style={styles.featureLabel}>{f.label}</Text>
+                <Text style={styles.featureLabel} allowFontScaling={false}>
+                  {f.label}
+                </Text>
               </View>
             ))}
-          </ScrollView>
+          </View>
 
           {/* ─── Bloc programmes fusionné ─── */}
           <View style={styles.sectionDivider}>
@@ -279,38 +355,14 @@ export default function PaywallScreen({ visible, onClose, onPurchaseSuccess }: P
             <ActivityIndicator color={GOLD} style={{ marginTop: 24 }} />
           ) : hasOffers ? (
             <View style={styles.tiersRow}>
-              {sortedPackages.map((pkg) => {
-                const isAnnual = pkg.packageType === 'ANNUAL';
-                const isSelected = selectedPkg?.identifier === pkg.identifier;
-                return (
-                  <TouchableOpacity
-                    key={pkg.identifier}
-                    style={[
-                      styles.tierCard,
-                      isAnnual && styles.tierCardPopular,
-                      isSelected && styles.tierCardSelected,
-                    ]}
-                    onPress={() => setSelectedPkg(pkg)}
-                    activeOpacity={0.85}
-                  >
-                    {isAnnual && (
-                      <View style={styles.popularBadge}>
-                        <Text style={styles.popularBadgeText}>★ LE PLUS POPULAIRE</Text>
-                      </View>
-                    )}
-                    <Text style={styles.tierLabel}>
-                      {pkg.packageType === 'MONTHLY' ? '1 MOIS'
-                        : pkg.packageType === 'ANNUAL' ? '12 MOIS'
-                        : pkg.packageType === 'SIX_MONTH' ? '6 MOIS'
-                        : pkg.product.title}
-                    </Text>
-                    <Text style={styles.tierPrice}>{pkg.product.priceString}</Text>
-                    <View style={[styles.radioOuter, isSelected && styles.radioOuterSelected]}>
-                      {isSelected && <View style={styles.radioInner} />}
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
+              {sortedPackages.map((pkg) => (
+                <TierCard
+                  key={pkg.identifier}
+                  pkg={pkg}
+                  isSelected={selectedPkg?.identifier === pkg.identifier}
+                  onPress={() => setSelectedPkg(pkg)}
+                />
+              ))}
             </View>
           ) : (
             <View style={styles.comingSoonBox}>
@@ -334,10 +386,22 @@ export default function PaywallScreen({ visible, onClose, onPurchaseSuccess }: P
         {/* ─── CTA sticky (slide-to-confirm) ─── */}
         <View style={[styles.stickyBar, { paddingBottom: 14 + insets.bottom }]}>
           <SlideToConfirm
-            label={hasOffers ? 'GLISSE POUR COMMENCER TA LÉGENDE' : 'BIENTÔT DISPONIBLE'}
-            disabled={!hasOffers || !selectedPkg}
+            label={
+              hasOffers
+                ? 'GLISSE POUR COMMENCER TA LÉGENDE'
+                : __DEV__
+                  ? 'MODE TEST : GLISSE ICI'
+                  : 'BIENTÔT DISPONIBLE'
+            }
+            disabled={!__DEV__ && (!hasOffers || !selectedPkg)}
             loading={purchasing !== null}
-            onConfirm={() => selectedPkg && handlePurchase(selectedPkg)}
+            onConfirm={() => {
+              if (selectedPkg) {
+                handlePurchase(selectedPkg);
+              } else {
+                Alert.alert('Mode test', "Le slider fonctionne. Aucun produit réel pour l'instant.");
+              }
+            }}
           />
           <View style={styles.secureRow}>
             <Image source={LOCK_ICON} style={styles.secureIcon} resizeMode="contain" />
@@ -358,28 +422,34 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   closeText: { color: GOLD, fontSize: 16, fontWeight: '700' },
-  scroll: { padding: 24, paddingTop: 60, alignItems: 'center' },
+  scroll: { paddingHorizontal: 24, paddingTop: 0, alignItems: 'center' },
 
   // Hero
   heroWrap: {
-    width: '100%', marginHorizontal: -24, marginTop: -60, marginBottom: 20,
-    aspectRatio: 4 / 5, overflow: 'hidden',
+    width: SCREEN_W, height: HERO_HEIGHT,
+    marginHorizontal: -24, marginTop: 0, marginBottom: 20,
+    overflow: 'hidden',
   },
   heroImage: { width: '100%', height: '100%' },
   heroOverlay: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
     paddingHorizontal: 24, paddingTop: 60, paddingBottom: 24,
-    backgroundColor: 'rgba(0,0,0,0.45)',
     alignItems: 'center',
   },
-  lambda: { fontSize: 36, color: GOLD, marginBottom: 6 },
+  // Pas de bandeau : l'ombre portée garde le texte lisible directement sur l'image.
+  lambda: {
+    fontSize: 36, color: GOLD, marginBottom: 6,
+    textShadowColor: 'rgba(0,0,0,0.9)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 10,
+  },
   title: {
     fontFamily: 'Cinzel', fontSize: 24, color: GOLD_BRIGHT,
     letterSpacing: 4, textAlign: 'center', marginBottom: 8,
+    textShadowColor: 'rgba(0,0,0,0.9)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 10,
   },
   subtitle: {
-    fontSize: 12, color: '#EDEDED', textAlign: 'center',
+    fontSize: 12, color: '#F2F2F2', textAlign: 'center',
     letterSpacing: 0.5, lineHeight: 18,
+    textShadowColor: 'rgba(0,0,0,0.95)', textShadowOffset: { width: 0, height: 1 }, textShadowRadius: 8,
   },
 
   sectionDivider: { width: '100%', alignItems: 'center', marginTop: 8, marginBottom: 16 },
@@ -389,11 +459,16 @@ const styles = StyleSheet.create({
   },
 
   // Rangée d'icônes premium
-  featureRow: { paddingVertical: 4, paddingHorizontal: 2 },
-  featureItem: { width: 84, alignItems: 'center', marginHorizontal: 6 },
-  featureIcon: { width: 40, height: 40, marginBottom: 6 },
+  // 5 colonnes égales sur (presque) toute la largeur de l'écran : plus de défilement,
+  // tout est visible d'un coup. width explicite car le contenu parent est centré.
+  featureRow: {
+    flexDirection: 'row', width: SCREEN_W - 12, alignSelf: 'center',
+    paddingVertical: 6, marginBottom: 6,
+  },
+  featureItem: { flex: 1, alignItems: 'center' },
+  featureIcon: { width: 44, height: 44, marginBottom: 8 },
   featureLabel: {
-    fontSize: 10, color: C.dim, textAlign: 'center', lineHeight: 13,
+    fontSize: 9, color: C.dim, textAlign: 'center', lineHeight: 12,
   },
 
   // Programmes
@@ -434,20 +509,26 @@ const styles = StyleSheet.create({
   },
 
   // Pricing
-  tiersRow: { flexDirection: 'row', width: '100%', gap: 8, marginTop: 8 },
+  tiersRow: { flexDirection: 'row', width: '100%', gap: 8, marginTop: 22, marginBottom: 10 },
+  tierWrap: { flex: 1 },
   tierCard: {
-    flex: 1, borderRadius: 14, borderWidth: 1, borderColor: GOLD + '33',
-    backgroundColor: '#0A0A0A', paddingVertical: 16, paddingHorizontal: 8,
-    alignItems: 'center', position: 'relative',
+    borderRadius: 14, borderWidth: 1, borderColor: GOLD + '22',
+    backgroundColor: '#0A0A0A', paddingVertical: 18, paddingHorizontal: 8,
+    alignItems: 'center',
   },
-  tierCardPopular: { borderColor: GOLD, paddingTop: 24 },
-  tierCardSelected: { backgroundColor: GOLD + '14', borderColor: GOLD },
+  tierCardSelected: {
+    backgroundColor: '#17120A', borderColor: GOLD, borderWidth: 1.5,
+    shadowColor: GOLD, shadowOpacity: 0.55, shadowRadius: 16, shadowOffset: { width: 0, height: 6 },
+  },
+  popularBadgeWrap: {
+    position: 'absolute', top: -11, left: -6, right: -6, alignItems: 'center',
+  },
   popularBadge: {
-    position: 'absolute', top: -10, alignSelf: 'center',
     backgroundColor: GOLD, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3,
   },
-  popularBadgeText: { fontSize: 8, color: '#000', fontWeight: '700', letterSpacing: 0.5 },
+  popularBadgeText: { fontSize: 7.5, color: '#000', fontWeight: '700', letterSpacing: 0.3 },
   tierLabel: { fontSize: 11, color: C.dim, letterSpacing: 1, marginBottom: 6 },
+  tierLabelSelected: { color: GOLD },
   tierPrice: {
     fontFamily: 'Cinzel', fontSize: 16, color: GOLD_BRIGHT,
     marginBottom: 10, textAlign: 'center',
